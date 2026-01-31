@@ -143,7 +143,26 @@ pipeline {
                                 sh '''
                                 # Start buildkitd in privileged mode
                                 buildkitd &
-                                sleep 3
+                                BUILDKITD_PID=$!
+                                
+                                # Wait for buildkitd socket to be ready (max 30 seconds)
+                                echo "Waiting for buildkitd to be ready..."
+                                for i in $(seq 1 30); do
+                                    if [ -S /run/buildkit/buildkitd.sock ]; then
+                                        echo "buildkitd is ready after ${i} seconds"
+                                        break
+                                    fi
+                                    if ! kill -0 $BUILDKITD_PID 2>/dev/null; then
+                                        echo "buildkitd process died unexpectedly"
+                                        exit 1
+                                    fi
+                                    sleep 1
+                                done
+                                
+                                if [ ! -S /run/buildkit/buildkitd.sock ]; then
+                                    echo "buildkitd socket not found after 30 seconds"
+                                    exit 1
+                                fi
                                 
                                 # Create BuildKit registry auth config
                                 mkdir -p ~/.docker
@@ -189,7 +208,26 @@ EOF
                                 sh '''
                                 # Start buildkitd in privileged mode
                                 buildkitd &
-                                sleep 3
+                                BUILDKITD_PID=$!
+                                
+                                # Wait for buildkitd socket to be ready (max 30 seconds)
+                                echo "Waiting for buildkitd to be ready..."
+                                for i in $(seq 1 30); do
+                                    if [ -S /run/buildkit/buildkitd.sock ]; then
+                                        echo "buildkitd is ready after ${i} seconds"
+                                        break
+                                    fi
+                                    if ! kill -0 $BUILDKITD_PID 2>/dev/null; then
+                                        echo "buildkitd process died unexpectedly"
+                                        exit 1
+                                    fi
+                                    sleep 1
+                                done
+                                
+                                if [ ! -S /run/buildkit/buildkitd.sock ]; then
+                                    echo "buildkitd socket not found after 30 seconds"
+                                    exit 1
+                                fi
                                 
                                 # Create BuildKit registry auth config
                                 mkdir -p ~/.docker
