@@ -27,12 +27,13 @@ pipeline {
                         memory: "512Mi"
                         cpu: "500m"
                   - name: buildkit
-                    image: moby/buildkit:latest
+                    image: moby/buildkit:master-rootless
                     command:
                     - cat
                     tty: true
                     securityContext:
-                      privileged: true
+                      runAsUser: 1000
+                      runAsGroup: 1000
                     resources:
                       requests:
                         memory: "256Mi"
@@ -141,9 +142,24 @@ pipeline {
                                     passwordVariable: 'DOCKER_PASS')
                             ]) {
                                 sh '''
-                                # Start buildkitd in background
-                                buildkitd --oci-worker-no-process-sandbox &
-                                sleep 3
+                                # Start rootless buildkitd
+                                buildkitd &
+                                
+                                # Wait for buildkitd to be ready
+                                timeout=30
+                                while [ $timeout -gt 0 ]; do
+                                    if buildctl debug workers >/dev/null 2>&1; then
+                                        echo "buildkitd is ready"
+                                        break
+                                    fi
+                                    sleep 1
+                                    timeout=$((timeout - 1))
+                                done
+                                
+                                if [ $timeout -eq 0 ]; then
+                                    echo "ERROR: buildkitd failed to start"
+                                    exit 1
+                                fi
                                 
                                 # Create BuildKit registry auth config
                                 mkdir -p ~/.docker
@@ -187,9 +203,24 @@ EOF
                                     passwordVariable: 'DOCKER_PASS')
                             ]) {
                                 sh '''
-                                # Start buildkitd in background
-                                buildkitd --oci-worker-no-process-sandbox &
-                                sleep 3
+                                # Start rootless buildkitd
+                                buildkitd &
+                                
+                                # Wait for buildkitd to be ready
+                                timeout=30
+                                while [ $timeout -gt 0 ]; do
+                                    if buildctl debug workers >/dev/null 2>&1; then
+                                        echo "buildkitd is ready"
+                                        break
+                                    fi
+                                    sleep 1
+                                    timeout=$((timeout - 1))
+                                done
+                                
+                                if [ $timeout -eq 0 ]; then
+                                    echo "ERROR: buildkitd failed to start"
+                                    exit 1
+                                fi
                                 
                                 # Create BuildKit registry auth config
                                 mkdir -p ~/.docker
