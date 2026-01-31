@@ -13,6 +13,7 @@ pipeline {
                   labels:
                     jenkins: agent
                 spec:
+                  serviceAccountName: jenkins
                   containers:
                   - name: golang
                     image: golang:1.21-alpine
@@ -189,14 +190,12 @@ DOCKERAUTH
         // =====================================================================
         // Stage 4: Deploy to Kubernetes
         // Uses envsubst for reliable variable substitution
+        // Note: ride-hailing namespace is pre-created by install-jenkins.sh
         // =====================================================================
         stage('Deploy to Kubernetes') {
             steps {
                 container('kubectl') {
                     sh '''
-                    # Apply namespace first
-                    kubectl apply -f services/namespace.yaml
-                    
                     # Deploy services with envsubst for reliable substitution
                     export DOCKER_REGISTRY="${DOCKER_REGISTRY}"
                     export IMAGE_TAG="${IMAGE_TAG}"

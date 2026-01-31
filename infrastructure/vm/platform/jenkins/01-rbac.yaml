@@ -1,6 +1,8 @@
 # =============================================================================
 # Jenkins ServiceAccount + RBAC
-# Required for Jenkins to interact with Kubernetes API
+# Follows Principle of Least Privilege:
+# - ClusterRole: Only for managing Jenkins agent pods in jenkins namespace
+# - Role: Scoped permissions for deploying to ride-hailing namespace only
 # =============================================================================
 apiVersion: v1
 kind: ServiceAccount
@@ -8,12 +10,13 @@ metadata:
   name: jenkins
   namespace: jenkins
 ---
+# ClusterRole: Minimal cluster-wide permissions for Jenkins agent management
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: jenkins
+  name: jenkins-agent-manager
 rules:
-  # Pod management for dynamic agents
+  # Pod management for dynamic agents (jenkins namespace only via RoleBinding)
   - apiGroups: [""]
     resources: ["pods"]
     verbs: ["create", "delete", "get", "list", "watch", "patch"]
@@ -40,14 +43,58 @@ rules:
     resources: ["events"]
     verbs: ["get", "list", "watch"]
 ---
+# Bind ClusterRole to jenkins SA in jenkins namespace
 apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
+kind: RoleBinding
 metadata:
-  name: jenkins
+  name: jenkins-agent-manager
+  namespace: jenkins
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: jenkins
+  name: jenkins-agent-manager
+subjects:
+  - kind: ServiceAccount
+    name: jenkins
+    namespace: jenkins
+---
+# Role: Scoped permissions for ride-hailing namespace ONLY
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: jenkins-deployer
+  namespace: ride-hailing
+rules:
+  # Deployment management
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  - apiGroups: ["apps"]
+    resources: ["replicasets"]
+    verbs: ["get", "list", "watch"]
+  # Service management
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  # ConfigMaps and Secrets for app configuration
+  - apiGroups: [""]
+    resources: ["configmaps", "secrets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  # Pods for rollout status check
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+---
+# Bind Role to jenkins SA for ride-hailing namespace
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: jenkins-deployer
+  namespace: ride-hailing
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: jenkins-deployer
 subjects:
   - kind: ServiceAccount
     name: jenkins
