@@ -1,23 +1,74 @@
 // =============================================================================
 // CI/CD Pipeline for Ride-Hailing Microservices
-// Builds and deploys Go services to Kubernetes cluster
+// Uses BuildKit for daemonless container builds (works with containerd)
 // =============================================================================
 
 pipeline {
-    agent any
+    agent {
+        kubernetes {
+            yaml '''
+                apiVersion: v1
+                kind: Pod
+                metadata:
+                  labels:
+                    jenkins: agent
+                spec:
+                  containers:
+                  - name: golang
+                    image: golang:1.21-alpine
+                    command:
+                    - cat
+                    tty: true
+                    resources:
+                      requests:
+                        memory: "256Mi"
+                        cpu: "100m"
+                      limits:
+                        memory: "512Mi"
+                        cpu: "500m"
+                  - name: buildkit
+                    image: moby/buildkit:latest
+                    command:
+                    - cat
+                    tty: true
+                    securityContext:
+                      privileged: true
+                    resources:
+                      requests:
+                        memory: "256Mi"
+                        cpu: "100m"
+                      limits:
+                        memory: "1Gi"
+                        cpu: "500m"
+                  - name: kubectl
+                    image: bitnami/kubectl:latest
+                    command:
+                    - cat
+                    tty: true
+                    resources:
+                      requests:
+                        memory: "64Mi"
+                        cpu: "50m"
+                      limits:
+                        memory: "128Mi"
+                        cpu: "100m"
+            '''
+        }
+    }
     
     environment {
-        // Docker Registry Configuration
-        DOCKER_REGISTRY_CRED = credentials('docker-registry-url')
-        DOCKER_REGISTRY = "${DOCKER_REGISTRY_CRED}"
-        DOCKER_CREDENTIALS = credentials('docker-registry-credentials')
+        // =================================================================
+        // Configuration (non-secrets)
+        // Set DOCKER_REGISTRY in Jenkins: Manage Jenkins → System → 
+        // Global properties → Environment variables
+        // Example: docker.io/yourusername
+        // =================================================================
+        DOCKER_REGISTRY = "${env.DOCKER_REGISTRY ?: 'docker.io/your-dockerhub-username'}"
         
         // Kubernetes Configuration
-        KUBECONFIG = credentials('kubeconfig')
         K8S_NAMESPACE = 'ride-hailing'
         
         // Build Configuration
-        GO_VERSION = '1.21'
         IMAGE_TAG = "${env.BUILD_NUMBER}-${env.GIT_COMMIT?.take(7) ?: 'latest'}"
     }
     
@@ -37,62 +88,38 @@ pipeline {
                 script {
                     echo "Building commit: ${env.GIT_COMMIT}"
                     echo "Image tag: ${IMAGE_TAG}"
+                    echo "Docker registry: ${DOCKER_REGISTRY}"
                 }
             }
         }
         
         // =====================================================================
-        // Stage 2: Build & Test Services (Parallel)
+        // Stage 2: Test Services (Parallel)
         // =====================================================================
-        stage('Build Services') {
+        stage('Test Services') {
             parallel {
-                stage('Dispatch Service') {
-                    stages {
-                        stage('Test Dispatch') {
-                            steps {
-                                dir('services/dispatch') {
-                                    sh '''
-                                        go mod download
-                                        go vet ./...
-                                        go test -v ./... || echo "No tests yet"
-                                    '''
-                                }
-                            }
-                        }
-                        stage('Build Dispatch Image') {
-                            steps {
-                                dir('services/dispatch') {
-                                    sh """
-                                        docker build -t ${DOCKER_REGISTRY}/dispatch-service:${IMAGE_TAG} .
-                                        docker tag ${DOCKER_REGISTRY}/dispatch-service:${IMAGE_TAG} ${DOCKER_REGISTRY}/dispatch-service:latest
-                                    """
-                                }
+                stage('Test Dispatch') {
+                    steps {
+                        container('golang') {
+                            dir('services/dispatch') {
+                                sh '''
+                                    go mod download
+                                    go vet ./...
+                                    go test -v ./... || echo "No tests yet"
+                                '''
                             }
                         }
                     }
                 }
-                
-                stage('Notification Service') {
-                    stages {
-                        stage('Test Notification') {
-                            steps {
-                                dir('services/notification') {
-                                    sh '''
-                                        go mod download
-                                        go vet ./...
-                                        go test -v ./... || echo "No tests yet"
-                                    '''
-                                }
-                            }
-                        }
-                        stage('Build Notification Image') {
-                            steps {
-                                dir('services/notification') {
-                                    sh """
-                                        docker build -t ${DOCKER_REGISTRY}/notification-service:${IMAGE_TAG} .
-                                        docker tag ${DOCKER_REGISTRY}/notification-service:${IMAGE_TAG} ${DOCKER_REGISTRY}/notification-service:latest
-                                    """
-                                }
+                stage('Test Notification') {
+                    steps {
+                        container('golang') {
+                            dir('services/notification') {
+                                sh '''
+                                    go mod download
+                                    go vet ./...
+                                    go test -v ./... || echo "No tests yet"
+                                '''
                             }
                         }
                     }
@@ -101,24 +128,101 @@ pipeline {
         }
         
         // =====================================================================
-        // Stage 3: Push Images to Registry
+        // Stage 3: Build & Push Images with BuildKit (Parallel)
         // =====================================================================
-        stage('Push Images') {
-            steps {
-                withCredentials([usernamePassword(
-                    credentialsId: 'docker-registry-credentials',
-                    usernameVariable: 'DOCKER_USER',
-                    passwordVariable: 'DOCKER_PASS'
-                )]) {
-                    sh '''
-                        echo "${DOCKER_PASS}" | docker login ${DOCKER_REGISTRY} -u "${DOCKER_USER}" --password-stdin
-                        
-                        docker push ${DOCKER_REGISTRY}/dispatch-service:${IMAGE_TAG}
-                        docker push ${DOCKER_REGISTRY}/dispatch-service:latest
-                        
-                        docker push ${DOCKER_REGISTRY}/notification-service:${IMAGE_TAG}
-                        docker push ${DOCKER_REGISTRY}/notification-service:latest
-                    '''
+        stage('Build & Push Images') {
+            parallel {
+                stage('Build Dispatch Image') {
+                    steps {
+                        container('buildkit') {
+                            withCredentials([
+                                usernamePassword(credentialsId: 'docker-registry-credentials', 
+                                    usernameVariable: 'DOCKER_USER', 
+                                    passwordVariable: 'DOCKER_PASS')
+                            ]) {
+                                sh '''
+                                # Start buildkitd in background
+                                buildkitd --oci-worker-no-process-sandbox &
+                                sleep 3
+                                
+                                # Create BuildKit registry auth config
+                                mkdir -p ~/.docker
+                                cat > ~/.docker/config.json <<EOF
+{
+  "auths": {
+    "https://index.docker.io/v1/": {
+      "username": "${DOCKER_USER}",
+      "password": "${DOCKER_PASS}"
+    }
+  }
+}
+EOF
+                                
+                                # Build and push with buildctl
+                                buildctl build \
+                                    --frontend dockerfile.v0 \
+                                    --local context=./services/dispatch \
+                                    --local dockerfile=./services/dispatch \
+                                    --output type=image,name=${DOCKER_REGISTRY}/dispatch-service:${IMAGE_TAG},push=true \
+                                    --export-cache type=inline \
+                                    --import-cache type=registry,ref=${DOCKER_REGISTRY}/dispatch-service:cache
+                                
+                                # Also tag as latest
+                                buildctl build \
+                                    --frontend dockerfile.v0 \
+                                    --local context=./services/dispatch \
+                                    --local dockerfile=./services/dispatch \
+                                    --output type=image,name=${DOCKER_REGISTRY}/dispatch-service:latest,push=true
+                                '''
+                            }
+                        }
+                    }
+                }
+                stage('Build Notification Image') {
+                    steps {
+                        container('buildkit') {
+                            withCredentials([
+                                usernamePassword(credentialsId: 'docker-registry-credentials', 
+                                    usernameVariable: 'DOCKER_USER', 
+                                    passwordVariable: 'DOCKER_PASS')
+                            ]) {
+                                sh '''
+                                # Start buildkitd in background
+                                buildkitd --oci-worker-no-process-sandbox &
+                                sleep 3
+                                
+                                # Create BuildKit registry auth config
+                                mkdir -p ~/.docker
+                                cat > ~/.docker/config.json <<EOF
+{
+  "auths": {
+    "https://index.docker.io/v1/": {
+      "username": "${DOCKER_USER}",
+      "password": "${DOCKER_PASS}"
+    }
+  }
+}
+EOF
+                                
+                                # Build and push with buildctl
+                                buildctl build \
+                                    --frontend dockerfile.v0 \
+                                    --local context=./services/notification \
+                                    --local dockerfile=./services/notification \
+                                    --output type=image,name=${DOCKER_REGISTRY}/notification-service:${IMAGE_TAG},push=true \
+                                    --export-cache type=inline \
+                                    --import-cache type=registry,ref=${DOCKER_REGISTRY}/notification-service:cache
+                                
+                                # Also tag as latest
+                                buildctl build \
+                                    --frontend dockerfile.v0 \
+                                    --local context=./services/notification \
+                                    --local dockerfile=./services/notification \
+                                    --output type=image,name=${DOCKER_REGISTRY}/notification-service:latest,push=true
+                                '''
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -128,28 +232,26 @@ pipeline {
         // =====================================================================
         stage('Deploy to Kubernetes') {
             steps {
-                script {
-                    // Apply namespace first
-                    sh "kubectl apply -f services/namespace.yaml"
+                container('kubectl') {
+                    sh '''
+                    # Apply namespace first
+                    kubectl apply -f services/namespace.yaml
                     
-                    // Deploy services with image substitution
-                    sh """
-                        cat services/dispatch/k8s.yaml | \\
-                            sed 's|\${DOCKER_REGISTRY}|${DOCKER_REGISTRY}|g' | \\
-                            sed 's|\${IMAGE_TAG}|${IMAGE_TAG}|g' | \\
-                            kubectl apply -f -
-                        
-                        cat services/notification/k8s.yaml | \\
-                            sed 's|\${DOCKER_REGISTRY}|${DOCKER_REGISTRY}|g' | \\
-                            sed 's|\${IMAGE_TAG}|${IMAGE_TAG}|g' | \\
-                            kubectl apply -f -
-                    """
+                    # Deploy services with image substitution
+                    cat services/dispatch/k8s.yaml | \
+                        sed "s|\\${DOCKER_REGISTRY}|${DOCKER_REGISTRY}|g" | \
+                        sed "s|\\${IMAGE_TAG}|${IMAGE_TAG}|g" | \
+                        kubectl apply -f -
                     
-                    // Wait for rollout
-                    sh """
-                        kubectl -n ${K8S_NAMESPACE} rollout status deployment/dispatch-service --timeout=120s
-                        kubectl -n ${K8S_NAMESPACE} rollout status deployment/notification-service --timeout=120s
-                    """
+                    cat services/notification/k8s.yaml | \
+                        sed "s|\\${DOCKER_REGISTRY}|${DOCKER_REGISTRY}|g" | \
+                        sed "s|\\${IMAGE_TAG}|${IMAGE_TAG}|g" | \
+                        kubectl apply -f -
+                    
+                    # Wait for rollout
+                    kubectl -n ride-hailing rollout status deployment/dispatch-service --timeout=120s
+                    kubectl -n ride-hailing rollout status deployment/notification-service --timeout=120s
+                    '''
                 }
             }
         }
@@ -159,13 +261,18 @@ pipeline {
         // =====================================================================
         stage('Verify') {
             steps {
-                sh """
+                container('kubectl') {
+                    sh '''
                     echo "=== Deployment Status ==="
-                    kubectl -n ${K8S_NAMESPACE} get pods -o wide
+                    kubectl -n ride-hailing get pods -o wide
                     
                     echo "=== Service Endpoints ==="
-                    kubectl -n ${K8S_NAMESPACE} get svc
-                """
+                    kubectl -n ride-hailing get svc
+                    
+                    echo "=== Istio Sidecar Check ==="
+                    kubectl -n ride-hailing get pods -o jsonpath='{range .items[*]}{.metadata.name}{": "}{.spec.containers[*].name}{"\\n"}{end}'
+                    '''
+                }
             }
         }
     }
@@ -177,15 +284,6 @@ pipeline {
         }
         failure {
             echo "Pipeline failed! Check logs for details."
-        }
-        always {
-            // Clean up Docker images to save space
-            node {
-                sh '''
-                    docker rmi ${DOCKER_REGISTRY}/dispatch-service:${IMAGE_TAG} || true
-                    docker rmi ${DOCKER_REGISTRY}/notification-service:${IMAGE_TAG} || true
-                '''
-            }
         }
     }
 }
