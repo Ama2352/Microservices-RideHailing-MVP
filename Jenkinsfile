@@ -180,10 +180,12 @@ pipeline {
         }
         always {
             // Clean up Docker images to save space
-            sh '''
-                docker rmi ${DOCKER_REGISTRY}/dispatch-service:${IMAGE_TAG} || true
-                docker rmi ${DOCKER_REGISTRY}/notification-service:${IMAGE_TAG} || true
-            '''
+            node {
+                sh '''
+                    docker rmi ${DOCKER_REGISTRY}/dispatch-service:${IMAGE_TAG} || true
+                    docker rmi ${DOCKER_REGISTRY}/notification-service:${IMAGE_TAG} || true
+                '''
+            }
         }
     }
 }
