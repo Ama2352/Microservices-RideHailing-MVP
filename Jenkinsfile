@@ -27,21 +27,28 @@ pipeline {
                         memory: "512Mi"
                         cpu: "500m"
                   - name: buildkit
-                    image: moby/buildkit:latest
-                    command:
-                    - cat
-                    tty: true
+                    image: moby/buildkit:v0.13.2
                     securityContext:
+                      # Required for BuildKit in Kubernetes without rootless mode
+                      # For production: consider dedicated BuildKit deployment with rootless
                       privileged: true
                     resources:
                       requests:
-                        memory: "256Mi"
-                        cpu: "100m"
+                        memory: "512Mi"
+                        cpu: "200m"
                       limits:
-                        memory: "1Gi"
-                        cpu: "500m"
+                        memory: "2Gi"
+                        cpu: "1000m"
+                    readinessProbe:
+                      exec:
+                        command:
+                        - buildctl
+                        - debug
+                        - workers
+                      initialDelaySeconds: 5
+                      periodSeconds: 5
                   - name: kubectl
-                    image: bitnami/kubectl:latest
+                    image: alpine/k8s:1.29.0
                     command:
                     - cat
                     tty: true
@@ -128,45 +135,22 @@ pipeline {
         }
         
         // =====================================================================
-        // Stage 3: Build & Push Images with BuildKit (Parallel)
+        // Stage 3: Build & Push Images with BuildKit
+        // Single build per service with multiple tags
+        // Cache stored in registry for persistence across pod restarts
         // =====================================================================
         stage('Build & Push Images') {
-            parallel {
-                stage('Build Dispatch Image') {
-                    steps {
-                        container('buildkit') {
-                            withCredentials([
-                                usernamePassword(credentialsId: 'docker-registry-credentials', 
-                                    usernameVariable: 'DOCKER_USER', 
-                                    passwordVariable: 'DOCKER_PASS')
-                            ]) {
-                                sh '''
-                                # Start buildkitd in privileged mode
-                                buildkitd &
-                                BUILDKITD_PID=$!
-                                
-                                # Wait for buildkitd socket to be ready (max 30 seconds)
-                                echo "Waiting for buildkitd to be ready..."
-                                for i in $(seq 1 30); do
-                                    if [ -S /run/buildkit/buildkitd.sock ]; then
-                                        echo "buildkitd is ready after ${i} seconds"
-                                        break
-                                    fi
-                                    if ! kill -0 $BUILDKITD_PID 2>/dev/null; then
-                                        echo "buildkitd process died unexpectedly"
-                                        exit 1
-                                    fi
-                                    sleep 1
-                                done
-                                
-                                if [ ! -S /run/buildkit/buildkitd.sock ]; then
-                                    echo "buildkitd socket not found after 30 seconds"
-                                    exit 1
-                                fi
-                                
-                                # Create BuildKit registry auth config
-                                mkdir -p ~/.docker
-                                cat > ~/.docker/config.json <<EOF
+            steps {
+                container('buildkit') {
+                    withCredentials([
+                        usernamePassword(credentialsId: 'docker-registry-credentials', 
+                            usernameVariable: 'DOCKER_USER', 
+                            passwordVariable: 'DOCKER_PASS')
+                    ]) {
+                        sh '''
+                        # Configure registry authentication for BuildKit
+                        mkdir -p /root/.docker
+                        cat > /root/.docker/config.json <<DOCKERAUTH
 {
   "auths": {
     "https://index.docker.io/v1/": {
@@ -175,91 +159,28 @@ pipeline {
     }
   }
 }
-EOF
-                                
-                                # Build and push with buildctl
-                                buildctl build \
-                                    --frontend dockerfile.v0 \
-                                    --local context=./services/dispatch \
-                                    --local dockerfile=./services/dispatch \
-                                    --output type=image,name=${DOCKER_REGISTRY}/dispatch-service:${IMAGE_TAG},push=true \
-                                    --export-cache type=inline \
-                                    --import-cache type=registry,ref=${DOCKER_REGISTRY}/dispatch-service:cache
-                                
-                                # Also tag as latest
-                                buildctl build \
-                                    --frontend dockerfile.v0 \
-                                    --local context=./services/dispatch \
-                                    --local dockerfile=./services/dispatch \
-                                    --output type=image,name=${DOCKER_REGISTRY}/dispatch-service:latest,push=true
-                                '''
-                            }
-                        }
-                    }
-                }
-                stage('Build Notification Image') {
-                    steps {
-                        container('buildkit') {
-                            withCredentials([
-                                usernamePassword(credentialsId: 'docker-registry-credentials', 
-                                    usernameVariable: 'DOCKER_USER', 
-                                    passwordVariable: 'DOCKER_PASS')
-                            ]) {
-                                sh '''
-                                # Start buildkitd in privileged mode
-                                buildkitd &
-                                BUILDKITD_PID=$!
-                                
-                                # Wait for buildkitd socket to be ready (max 30 seconds)
-                                echo "Waiting for buildkitd to be ready..."
-                                for i in $(seq 1 30); do
-                                    if [ -S /run/buildkit/buildkitd.sock ]; then
-                                        echo "buildkitd is ready after ${i} seconds"
-                                        break
-                                    fi
-                                    if ! kill -0 $BUILDKITD_PID 2>/dev/null; then
-                                        echo "buildkitd process died unexpectedly"
-                                        exit 1
-                                    fi
-                                    sleep 1
-                                done
-                                
-                                if [ ! -S /run/buildkit/buildkitd.sock ]; then
-                                    echo "buildkitd socket not found after 30 seconds"
-                                    exit 1
-                                fi
-                                
-                                # Create BuildKit registry auth config
-                                mkdir -p ~/.docker
-                                cat > ~/.docker/config.json <<EOF
-{
-  "auths": {
-    "https://index.docker.io/v1/": {
-      "username": "${DOCKER_USER}",
-      "password": "${DOCKER_PASS}"
-    }
-  }
-}
-EOF
-                                
-                                # Build and push with buildctl
-                                buildctl build \
-                                    --frontend dockerfile.v0 \
-                                    --local context=./services/notification \
-                                    --local dockerfile=./services/notification \
-                                    --output type=image,name=${DOCKER_REGISTRY}/notification-service:${IMAGE_TAG},push=true \
-                                    --export-cache type=inline \
-                                    --import-cache type=registry,ref=${DOCKER_REGISTRY}/notification-service:cache
-                                
-                                # Also tag as latest
-                                buildctl build \
-                                    --frontend dockerfile.v0 \
-                                    --local context=./services/notification \
-                                    --local dockerfile=./services/notification \
-                                    --output type=image,name=${DOCKER_REGISTRY}/notification-service:latest,push=true
-                                '''
-                            }
-                        }
+DOCKERAUTH
+                        
+                        echo "=== Building Dispatch Service ==="
+                        buildctl build \
+                            --frontend dockerfile.v0 \
+                            --local context=./services/dispatch \
+                            --local dockerfile=./services/dispatch \
+                            --output type=image,name=${DOCKER_REGISTRY}/dispatch-service:${IMAGE_TAG},push=true \
+                            --output type=image,name=${DOCKER_REGISTRY}/dispatch-service:latest,push=true \
+                            --export-cache type=registry,ref=${DOCKER_REGISTRY}/dispatch-service:buildcache,mode=max \
+                            --import-cache type=registry,ref=${DOCKER_REGISTRY}/dispatch-service:buildcache
+                        
+                        echo "=== Building Notification Service ==="
+                        buildctl build \
+                            --frontend dockerfile.v0 \
+                            --local context=./services/notification \
+                            --local dockerfile=./services/notification \
+                            --output type=image,name=${DOCKER_REGISTRY}/notification-service:${IMAGE_TAG},push=true \
+                            --output type=image,name=${DOCKER_REGISTRY}/notification-service:latest,push=true \
+                            --export-cache type=registry,ref=${DOCKER_REGISTRY}/notification-service:buildcache,mode=max \
+                            --import-cache type=registry,ref=${DOCKER_REGISTRY}/notification-service:buildcache
+                        '''
                     }
                 }
             }
@@ -267,6 +188,7 @@ EOF
         
         // =====================================================================
         // Stage 4: Deploy to Kubernetes
+        // Uses envsubst for reliable variable substitution
         // =====================================================================
         stage('Deploy to Kubernetes') {
             steps {
@@ -275,16 +197,12 @@ EOF
                     # Apply namespace first
                     kubectl apply -f services/namespace.yaml
                     
-                    # Deploy services with image substitution
-                    cat services/dispatch/k8s.yaml | \
-                        sed "s|\\${DOCKER_REGISTRY}|${DOCKER_REGISTRY}|g" | \
-                        sed "s|\\${IMAGE_TAG}|${IMAGE_TAG}|g" | \
-                        kubectl apply -f -
+                    # Deploy services with envsubst for reliable substitution
+                    export DOCKER_REGISTRY="${DOCKER_REGISTRY}"
+                    export IMAGE_TAG="${IMAGE_TAG}"
                     
-                    cat services/notification/k8s.yaml | \
-                        sed "s|\\${DOCKER_REGISTRY}|${DOCKER_REGISTRY}|g" | \
-                        sed "s|\\${IMAGE_TAG}|${IMAGE_TAG}|g" | \
-                        kubectl apply -f -
+                    cat services/dispatch/k8s.yaml | envsubst | kubectl apply -f -
+                    cat services/notification/k8s.yaml | envsubst | kubectl apply -f -
                     
                     # Wait for rollout
                     kubectl -n ride-hailing rollout status deployment/dispatch-service --timeout=120s
