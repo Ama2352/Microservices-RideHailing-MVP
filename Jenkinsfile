@@ -27,13 +27,12 @@ pipeline {
                         memory: "512Mi"
                         cpu: "500m"
                   - name: buildkit
-                    image: moby/buildkit:master-rootless
+                    image: moby/buildkit:latest
                     command:
                     - cat
                     tty: true
                     securityContext:
-                      runAsUser: 1000
-                      runAsGroup: 1000
+                      privileged: true
                     resources:
                       requests:
                         memory: "256Mi"
@@ -142,24 +141,9 @@ pipeline {
                                     passwordVariable: 'DOCKER_PASS')
                             ]) {
                                 sh '''
-                                # Start rootless buildkitd
+                                # Start buildkitd in privileged mode
                                 buildkitd &
-                                
-                                # Wait for buildkitd to be ready
-                                timeout=30
-                                while [ $timeout -gt 0 ]; do
-                                    if buildctl debug workers >/dev/null 2>&1; then
-                                        echo "buildkitd is ready"
-                                        break
-                                    fi
-                                    sleep 1
-                                    timeout=$((timeout - 1))
-                                done
-                                
-                                if [ $timeout -eq 0 ]; then
-                                    echo "ERROR: buildkitd failed to start"
-                                    exit 1
-                                fi
+                                sleep 3
                                 
                                 # Create BuildKit registry auth config
                                 mkdir -p ~/.docker
@@ -203,24 +187,9 @@ EOF
                                     passwordVariable: 'DOCKER_PASS')
                             ]) {
                                 sh '''
-                                # Start rootless buildkitd
+                                # Start buildkitd in privileged mode
                                 buildkitd &
-                                
-                                # Wait for buildkitd to be ready
-                                timeout=30
-                                while [ $timeout -gt 0 ]; do
-                                    if buildctl debug workers >/dev/null 2>&1; then
-                                        echo "buildkitd is ready"
-                                        break
-                                    fi
-                                    sleep 1
-                                    timeout=$((timeout - 1))
-                                done
-                                
-                                if [ $timeout -eq 0 ]; then
-                                    echo "ERROR: buildkitd failed to start"
-                                    exit 1
-                                fi
+                                sleep 3
                                 
                                 # Create BuildKit registry auth config
                                 mkdir -p ~/.docker
