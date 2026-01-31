@@ -1,0 +1,151 @@
+---
+- name: Configure Kubernetes Master Node (Standard)
+  hosts: all
+  connection: local
+  become: yes
+  vars:
+    k8s_version: "1.30"
+    pod_network_cidr: "192.168.0.0/16" 
+
+  tasks:
+    # --- 1. SYSTEM PREPARATION ---
+    - name: Disable Swap (Standard K8s Requirement)
+      shell: |
+        swapoff -a
+        sed -i '/swap/d' /etc/fstab
+
+    - name: Load Kernel Modules
+      community.general.modprobe:
+        name: "{{ item }}"
+        state: present
+      loop: [overlay, br_netfilter]
+
+    - name: Configure Sysctl Networking
+      ansible.posix.sysctl:
+        name: "{{ item.name }}"
+        value: "{{ item.value }}"
+        state: present
+        reload: yes
+      loop:
+        - { name: 'net.bridge.bridge-nf-call-iptables', value: '1' }
+        - { name: 'net.bridge.bridge-nf-call-ip6tables', value: '1' }
+        - { name: 'net.ipv4.ip_forward', value: '1' }
+
+    # --- 2. CONTAINER RUNTIME ---
+    - name: Install Containerd
+      apt:
+        name: containerd
+        state: present
+        update_cache: yes
+
+    - name: Generate Containerd Config
+      shell: |
+        mkdir -p /etc/containerd
+        containerd config default > /etc/containerd/config.toml
+        sed -i 's/SystemdCgroup = false/SystemdCgroup = true/g' /etc/containerd/config.toml
+      args:
+        creates: /etc/containerd/config.toml
+
+    - name: Restart Containerd
+      service:
+        name: containerd
+        state: restarted
+        enabled: yes
+
+    # --- 3. KUBERNETES PACKAGES ---
+    - name: Add Kubernetes GPG Key
+      shell: |
+        mkdir -p /etc/apt/keyrings
+        curl -fsSL https://pkgs.k8s.io/core:/stable:/v{{ k8s_version }}/deb/Release.key | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg --yes
+
+    - name: Add Kubernetes Repo
+      apt_repository:
+        repo: "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v{{ k8s_version }}/deb/ /"
+        filename: kubernetes
+        state: present
+
+    - name: Install K8s Binaries
+      apt:
+        name: [kubelet, kubeadm, kubectl]
+        state: present
+        update_cache: yes
+
+    - name: Hold K8s Packages
+      dpkg_selections:
+        name: "{{ item }}"
+        selection: hold
+      loop: [kubelet, kubeadm, kubectl]
+
+    # --- 4. CLUSTER INITIALIZATION ---
+    - name: Initialize Control Plane
+      command: |
+        kubeadm init \
+          --apiserver-advertise-address=192.168.242.10 \
+          --pod-network-cidr={{ pod_network_cidr }} \
+          --ignore-preflight-errors=NumCPU
+      args:
+        creates: /etc/kubernetes/admin.conf
+
+    - name: Setup Kubeconfig for Vagrant User
+      shell: |
+        mkdir -p /home/vagrant/.kube
+        cp -i /etc/kubernetes/admin.conf /home/vagrant/.kube/config
+        chown vagrant:vagrant /home/vagrant/.kube/config
+      args:
+        creates: /home/vagrant/.kube/config
+
+    # --- 5. NETWORK PLUGIN (CALICO) ---
+    - name: Check if Calico is already installed
+      become_user: vagrant
+      command: kubectl get deployment tigera-operator -n tigera-operator
+      register: calico_check
+      failed_when: false
+      changed_when: false
+
+    - name: Install Calico Operator
+      become_user: vagrant
+      command: kubectl create -f https://raw.githubusercontent.com/projectcalico/calico/v3.27.0/manifests/tigera-operator.yaml
+      when: calico_check.rc != 0
+
+    - name: Install Calico Custom Resources
+      become_user: vagrant
+      command: kubectl create -f https://raw.githubusercontent.com/projectcalico/calico/v3.27.0/manifests/custom-resources.yaml
+      when: calico_check.rc != 0
+
+    - name: Wait for Calico pods to be ready
+      become_user: vagrant
+      shell: |
+        kubectl wait --for=condition=ready pod -l k8s-app=calico-node -n calico-system --timeout=300s
+        kubectl wait --for=condition=ready pod -l k8s-app=calico-kube-controllers -n calico-system --timeout=300s
+      retries: 3
+      delay: 10
+      register: calico_ready
+      until: calico_ready.rc == 0
+
+    # --- 6. GENERATE JOIN TOKEN ---
+    - name: Generate kubeadm join command
+      command: kubeadm token create --print-join-command
+      register: join_command
+      changed_when: false
+
+    - name: Save join command to file
+      copy:
+        content: "{{ join_command.stdout }}"
+        dest: /vagrant/k8s-join-command.sh
+        mode: '0755'
+
+    - name: Display join instructions
+      debug:
+        msg:
+          - "======================================"
+          - "Cluster initialization complete!"
+          - "======================================"
+          - ""
+          - "To join worker nodes, run on each worker:"
+          - "  vagrant ssh k8s-worker-1"
+          - "  sudo $(cat /vagrant/k8s-join-command.sh)"
+          - ""
+          - "Or from host machine:"
+          - "  vagrant ssh k8s-worker-1 -c 'sudo $(cat /vagrant/k8s-join-command.sh)'"
+          - "  vagrant ssh k8s-worker-2 -c 'sudo $(cat /vagrant/k8s-join-command.sh)'"
+          - ""

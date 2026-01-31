@@ -1,0 +1,10 @@
+# =============================================================================
+# Dispatch Service Namespace
+# =============================================================================
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ride-hailing
+  labels:
+    name: ride-hailing
+    istio-injection: enabled

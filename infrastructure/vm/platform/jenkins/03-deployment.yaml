@@ -1,0 +1,101 @@
+# =============================================================================
+# Jenkins Deployment (Minimal for 9GB cluster)
+# =============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jenkins
+  namespace: jenkins
+  labels:
+    app: jenkins
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: jenkins
+  template:
+    metadata:
+      labels:
+        app: jenkins
+    spec:
+      serviceAccountName: jenkins
+      
+      # Security Context - Jenkins runs as user 1000
+      securityContext:
+        fsGroup: 1000
+        runAsUser: 1000
+      
+      # Init container to fix volume permissions
+      initContainers:
+        - name: volume-permissions
+          image: busybox:latest
+          command:
+            - sh
+            - -c
+            - |
+              chown -R 1000:1000 /var/jenkins_home
+              chmod -R 755 /var/jenkins_home
+          volumeMounts:
+            - name: jenkins-home
+              mountPath: /var/jenkins_home
+          securityContext:
+            runAsUser: 0
+      
+      containers:
+        - name: jenkins
+          image: jenkins/jenkins:lts-jdk17
+          imagePullPolicy: IfNotPresent
+          
+          ports:
+            - name: http
+              containerPort: 8080
+            - name: jnlp
+              containerPort: 50000
+          
+          # Resource limits for constrained environment
+          resources:
+            requests:
+              cpu: 200m
+              memory: 512Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+          
+          # Volume mounts
+          volumeMounts:
+            - name: jenkins-home
+              mountPath: /var/jenkins_home
+          
+          # Health checks
+          livenessProbe:
+            httpGet:
+              path: /login
+              port: 8080
+            initialDelaySeconds: 120
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 5
+          
+          readinessProbe:
+            httpGet:
+              path: /login
+              port: 8080
+            initialDelaySeconds: 60
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          
+          # Environment variables
+          env:
+            - name: JAVA_OPTS
+              value: >-
+                -Xms256m
+                -Xmx512m
+                -Dhudson.slaves.NodeProvisioner.initialDelay=0
+                -Dhudson.slaves.NodeProvisioner.MARGIN=50
+                -Dhudson.slaves.NodeProvisioner.MARGIN0=0.85
+      
+      volumes:
+        - name: jenkins-home
+          persistentVolumeClaim:
+            claimName: jenkins-pvc
