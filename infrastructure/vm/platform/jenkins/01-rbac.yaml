@@ -84,6 +84,10 @@ rules:
   - apiGroups: [""]
     resources: ["pods"]
     verbs: ["get", "list", "watch"]
+  # Istio networking resources
+  - apiGroups: ["networking.istio.io"]
+    resources: ["virtualservices", "destinationrules", "gateways"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
 ---
 # Bind Role to jenkins SA for ride-hailing namespace
 apiVersion: rbac.authorization.k8s.io/v1
