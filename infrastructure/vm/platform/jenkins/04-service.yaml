@@ -1,5 +1,5 @@
 # =============================================================================
-# Jenkins Services
+# Jenkins Service
 # =============================================================================
 apiVersion: v1
 kind: Service
@@ -20,3 +20,25 @@ spec:
     - name: jnlp
       port: 50000
       targetPort: 50000
+# =============================================================================
+# VirtualService for Jenkins
+# =============================================================================
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: jenkins
+  namespace: jenkins
+spec:
+  hosts:
+    - "*"
+  gateways:
+    - istio-system/ride-hailing-gateway
+  http:
+    - match:
+        - uri:
+            prefix: /github-webhook/
+      route:
+        - destination:
+            host: jenkins.jenkins.svc.cluster.local
+            port:
+              number: 8080
