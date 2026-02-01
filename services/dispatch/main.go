@@ -35,7 +35,7 @@ func main() {
 	// Health check endpoint
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		response := HealthResponse{
-			Status:    "unhealthy",
+			Status:    "healthy",
 			Service:   config.ServiceName,
 			Version:   config.Version,
 			Timestamp: time.Now().UTC().Format(time.RFC3339),
