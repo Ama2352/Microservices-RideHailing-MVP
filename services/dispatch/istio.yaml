@@ -11,11 +11,11 @@ spec:
   hosts:
     - "*"  # Accept traffic for any host
   gateways:
-    - istio-system/ride-hailing-gateway  # Bind to our gateway
+    - ride-hailing-gateway  # Bind to our gateway
   http:
     - match:
         - uri:
-            prefix: "/dispatch"
+            prefix: "/dispatch/"
       rewrite:
         uri: "/"  # Rewrite /dispatch/health to /health
       route:

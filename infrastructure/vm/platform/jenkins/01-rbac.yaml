@@ -103,3 +103,30 @@ subjects:
   - kind: ServiceAccount
     name: jenkins
     namespace: jenkins
+---
+# Role: Scoped permissions for istio-system namespace only
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: jenkins-istio-viewer
+  namespace: istio-system
+
+rules:
+  - apiGroups: [""]
+    resources: ["services", "endpoints", "pods"]
+    verbs: ["get", "list", "watch"]
+---
+# Bind Role to jenkins SA for istio-system namespace
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: jenkins-istio-viewer-binding
+  namespace: istio-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: jenkins-istio-viewer
+subjects:
+  - kind: ServiceAccount
+    name: jenkins
+    namespace: jenkins 
