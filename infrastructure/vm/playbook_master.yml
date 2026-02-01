@@ -122,7 +122,49 @@
       register: calico_ready
       until: calico_ready.rc == 0
 
-    # --- 6. GENERATE JOIN TOKEN ---
+    # --- 6. FIX COREDNS DNS RESOLUTION ---
+    - name: Fix CoreDNS to use public DNS servers
+      become_user: vagrant
+      shell: |
+        kubectl apply -f - <<'EOF'
+        apiVersion: v1
+        kind: ConfigMap
+        metadata:
+          name: coredns
+          namespace: kube-system
+        data:
+          Corefile: |
+            .:53 {
+                errors
+                health {
+                   lameduck 5s
+                }
+                ready
+                kubernetes cluster.local in-addr.arpa ip6.arpa {
+                   pods insecure
+                   fallthrough in-addr.arpa ip6.arpa
+                   ttl 30
+                }
+                prometheus :9153
+                forward . 8.8.8.8 8.8.4.4 {
+                   max_concurrent 1000
+                }
+                cache 30
+                loop
+                reload
+                loadbalance
+            }
+        EOF
+
+    - name: Restart CoreDNS to apply DNS fix
+      become_user: vagrant
+      command: kubectl -n kube-system rollout restart deployment coredns
+
+    - name: Wait for CoreDNS to be ready
+      become_user: vagrant
+      command: kubectl -n kube-system rollout status deployment coredns --timeout=60s
+
+    # --- 7. GENERATE JOIN TOKEN ---
     - name: Generate kubeadm join command
       command: kubeadm token create --print-join-command
       register: join_command

@@ -196,12 +196,17 @@ DOCKERAUTH
             steps {
                 container('kubectl') {
                     sh '''
-                    # Deploy services with envsubst for reliable substitution
+                    # Deploy Kubernetes resources with envsubst for reliable substitution
                     export DOCKER_REGISTRY="${DOCKER_REGISTRY}"
                     export IMAGE_TAG="${IMAGE_TAG}"
                     
+                    # Deploy Dispatch Service (K8s + Istio)
                     cat services/dispatch/k8s.yaml | envsubst | kubectl apply -f -
+                    kubectl apply -f services/dispatch/istio.yaml
+                    
+                    # Deploy Notification Service (K8s + Istio)
                     cat services/notification/k8s.yaml | envsubst | kubectl apply -f -
+                    kubectl apply -f services/notification/istio.yaml
                     
                     # Wait for rollout
                     kubectl -n ride-hailing rollout status deployment/dispatch-service --timeout=120s
@@ -224,8 +229,19 @@ DOCKERAUTH
                     echo "=== Service Endpoints ==="
                     kubectl -n ride-hailing get svc
                     
+                    echo "=== Istio Configuration ==="
+                    kubectl -n ride-hailing get gateway,virtualservice,destinationrule
+                    
                     echo "=== Istio Sidecar Check ==="
                     kubectl -n ride-hailing get pods -o jsonpath='{range .items[*]}{.metadata.name}{": "}{.spec.containers[*].name}{"\\n"}{end}'
+                    
+                    echo "=== Ingress Gateway ==="
+                    kubectl -n istio-system get svc istio-ingressgateway
+                    
+                    echo ""
+                    echo "API Endpoints (via NodePort 30080):"
+                    echo "  Dispatch:      http://<node-ip>:30080/dispatch/health"
+                    echo "  Notification:  http://<node-ip>:30080/notification/health"
                     '''
                 }
             }
