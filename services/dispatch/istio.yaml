@@ -11,7 +11,7 @@ spec:
   hosts:
     - "*"  # Accept traffic for any host
   gateways:
-    - ride-hailing-gateway  # Bind to our gateway
+    - istio-system/ride-hailing-gateway  # Bind to our gateway
   http:
     - match:
         - uri:
