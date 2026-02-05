@@ -140,15 +140,17 @@ pipeline {
                                     echo "✓ Notification dependencies: No HIGH/CRITICAL vulnerabilities found"
                                 }
                                 
-                                // Archive reports for review
-                                archiveArtifacts artifacts: 'reports/**/*', allowEmptyArchive: true
-                                
                                 if (scanFailed) {
                                     error("Dependency scan failed: HIGH/CRITICAL vulnerabilities detected. Review archived reports and update dependencies.")
                                 }
                                 
                                 echo "\n✓ All dependencies passed security scan"
                             }
+                        }
+                        
+                        // Archive reports - must run outside container context for Jenkins to access
+                        script {
+                            archiveArtifacts artifacts: 'reports/**/*', allowEmptyArchive: true
                         }
                     }
                 }
