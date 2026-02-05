@@ -11,6 +11,18 @@ spec:
   serviceAccountName: jenkins
   
   # ===========================================================================
+  # Node Selection - Pin agent to master node where hostPath PV exists
+  # Required because dependency-check-data PV uses hostPath storage
+  # For production: use shared storage (NFS/Ceph) and remove this constraint
+  # ===========================================================================
+  nodeSelector:
+    kubernetes.io/hostname: k8s-master
+  tolerations:
+  - key: "node-role.kubernetes.io/control-plane"
+    operator: "Exists"
+    effect: "NoSchedule"
+  
+  # ===========================================================================
   # Init Container - Clean stale database locks before main containers start
   # OWASP Dependency-Check uses file-based locking (*.lck files). If a previous
   # run crashed, stale locks prevent new scans from acquiring the database.

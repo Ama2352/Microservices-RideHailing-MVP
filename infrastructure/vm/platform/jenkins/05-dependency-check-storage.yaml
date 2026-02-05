@@ -2,6 +2,9 @@
 # PersistentVolume and PersistentVolumeClaim for OWASP Dependency-Check
 # Stores NVD (National Vulnerability Database) cache to avoid re-downloading
 # Database size: ~500MB-1GB, updated periodically
+#
+# NOTE: hostPath requires nodeAffinity in multi-node clusters because the
+# directory only exists on one node. Agent pods must be scheduled on this node.
 # =============================================================================
 ---
 apiVersion: v1
@@ -20,6 +23,15 @@ spec:
   hostPath:
     path: /var/jenkins-cache/dependency-check
     type: DirectoryOrCreate
+  # Required: Pin this PV to a specific node since hostPath is node-local
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+      - matchExpressions:
+        - key: kubernetes.io/hostname
+          operator: In
+          values:
+          - k8s-master
 
 ---
 apiVersion: v1
