@@ -6,61 +6,8 @@
 pipeline {
     agent {
         kubernetes {
-            yaml '''
-                apiVersion: v1
-                kind: Pod
-                metadata:
-                  labels:
-                    jenkins: agent
-                spec:
-                  serviceAccountName: jenkins
-                  containers:
-                  - name: golang
-                    image: golang:1.21-alpine
-                    command:
-                    - cat
-                    tty: true
-                    resources:
-                      requests:
-                        memory: "256Mi"
-                        cpu: "100m"
-                      limits:
-                        memory: "512Mi"
-                        cpu: "500m"
-                  - name: buildkit
-                    image: moby/buildkit:v0.13.2
-                    securityContext:
-                      # Required for BuildKit in Kubernetes without rootless mode
-                      # For production: consider dedicated BuildKit deployment with rootless
-                      privileged: true
-                    resources:
-                      requests:
-                        memory: "512Mi"
-                        cpu: "200m"
-                      limits:
-                        memory: "2Gi"
-                        cpu: "1000m"
-                    readinessProbe:
-                      exec:
-                        command:
-                        - buildctl
-                        - debug
-                        - workers
-                      initialDelaySeconds: 5
-                      periodSeconds: 5
-                  - name: kubectl
-                    image: alpine/k8s:1.29.0
-                    command:
-                    - cat
-                    tty: true
-                    resources:
-                      requests:
-                        memory: "64Mi"
-                        cpu: "50m"
-                      limits:
-                        memory: "128Mi"
-                        cpu: "100m"
-            '''
+            // Load agent pod template from external file for better maintainability
+            yamlFile 'infrastructure/vm/platform/jenkins/agent-pod.yaml'
         }
     }
     
@@ -188,7 +135,68 @@ DOCKERAUTH
         }
         
         // =====================================================================
-        // Stage 4: Deploy to Kubernetes
+        // Stage 4: Security Scan - Container Images
+        // Scans built images for vulnerabilities before pushing to registry
+        // Fails pipeline on HIGH or CRITICAL severity findings
+        // =====================================================================
+        stage('Security Scan - Images') {
+            steps {
+                container('trivy') {
+                    script {
+                        def scanFailed = false
+                        
+                        echo "=== Scanning Dispatch Service Image ==="
+                        def dispatchScan = sh(
+                            script: """
+                                trivy image \
+                                    --severity HIGH,CRITICAL \
+                                    --exit-code 1 \
+                                    --no-progress \
+                                    --format table \
+                                    ${DOCKER_REGISTRY}/dispatch-service:${IMAGE_TAG}
+                            """,
+                            returnStatus: true
+                        )
+                        
+                        if (dispatchScan != 0) {
+                            echo "⚠️ SECURITY ALERT: Dispatch service has HIGH/CRITICAL vulnerabilities!"
+                            scanFailed = true
+                        } else {
+                            echo "✓ Dispatch service: No HIGH/CRITICAL vulnerabilities found"
+                        }
+                        
+                        echo "\n=== Scanning Notification Service Image ==="
+                        def notificationScan = sh(
+                            script: """
+                                trivy image \
+                                    --severity HIGH,CRITICAL \
+                                    --exit-code 1 \
+                                    --no-progress \
+                                    --format table \
+                                    ${DOCKER_REGISTRY}/notification-service:${IMAGE_TAG}
+                            """,
+                            returnStatus: true
+                        )
+                        
+                        if (notificationScan != 0) {
+                            echo "⚠️ SECURITY ALERT: Notification service has HIGH/CRITICAL vulnerabilities!"
+                            scanFailed = true
+                        } else {
+                            echo "✓ Notification service: No HIGH/CRITICAL vulnerabilities found"
+                        }
+                        
+                        if (scanFailed) {
+                            error("Security scan failed: HIGH/CRITICAL vulnerabilities detected. Fix vulnerabilities before deployment.")
+                        }
+                        
+                        echo "\n✓ All images passed security scan"
+                    }
+                }
+            }
+        }
+        
+        // =====================================================================
+        // Stage 5: Deploy to Kubernetes
         // Uses envsubst for reliable variable substitution
         // Note: ride-hailing namespace is pre-created by install-jenkins.sh
         // =====================================================================
@@ -217,7 +225,7 @@ DOCKERAUTH
         }
         
         // =====================================================================
-        // Stage 5: Verify Deployment
+        // Stage 6: Verify Deployment
         // =====================================================================
         stage('Verify') {
             steps {

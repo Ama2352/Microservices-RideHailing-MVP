@@ -1,0 +1,86 @@
+# =============================================================================
+# Jenkins Agent Pod Template for CI/CD Pipeline
+# Defines all containers needed for building, testing, scanning, and deploying
+# =============================================================================
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    jenkins: agent
+spec:
+  serviceAccountName: jenkins
+  containers:
+  # ===========================================================================
+  # Golang Container - For running tests and building Go applications
+  # ===========================================================================
+  - name: golang
+    image: golang:1.21-alpine
+    command:
+    - cat
+    tty: true
+    resources:
+      requests:
+        memory: "256Mi"
+        cpu: "100m"
+      limits:
+        memory: "512Mi"
+        cpu: "500m"
+  
+  # ===========================================================================
+  # BuildKit Container - For building container images without Docker daemon
+  # Requires privileged mode for now; production should use rootless BuildKit
+  # ===========================================================================
+  - name: buildkit
+    image: moby/buildkit:v0.13.2
+    securityContext:
+      # Required for BuildKit in Kubernetes without rootless mode
+      # For production: consider dedicated BuildKit deployment with rootless
+      privileged: true
+    resources:
+      requests:
+        memory: "512Mi"
+        cpu: "200m"
+      limits:
+        memory: "2Gi"
+        cpu: "1000m"
+    readinessProbe:
+      exec:
+        command:
+        - buildctl
+        - debug
+        - workers
+      initialDelaySeconds: 5
+      periodSeconds: 5
+  
+  # ===========================================================================
+  # Kubectl Container - For deploying to Kubernetes cluster
+  # ===========================================================================
+  - name: kubectl
+    image: alpine/k8s:1.29.0
+    command:
+    - cat
+    tty: true
+    resources:
+      requests:
+        memory: "64Mi"
+        cpu: "50m"
+      limits:
+        memory: "128Mi"
+        cpu: "100m"
+  
+  # ===========================================================================
+  # Trivy Container - For security scanning of container images
+  # Scans for vulnerabilities in OS packages and application dependencies
+  # ===========================================================================
+  - name: trivy
+    image: aquasec/trivy:0.48.3
+    command:
+    - cat
+    tty: true
+    resources:
+      requests:
+        memory: "128Mi"
+        cpu: "100m"
+      limits:
+        memory: "256Mi"
+        cpu: "200m"
