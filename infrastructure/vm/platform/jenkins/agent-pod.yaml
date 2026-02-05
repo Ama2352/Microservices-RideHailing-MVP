@@ -9,6 +9,27 @@ metadata:
     jenkins: agent
 spec:
   serviceAccountName: jenkins
+  
+  # ===========================================================================
+  # Init Container - Clean stale database locks before main containers start
+  # OWASP Dependency-Check uses file-based locking (*.lck files). If a previous
+  # run crashed, stale locks prevent new scans from acquiring the database.
+  # ===========================================================================
+  initContainers:
+  - name: cleanup-stale-locks
+    image: busybox:1.36
+    command:
+    - /bin/sh
+    - -c
+    - |
+      echo "=== Cleaning stale dependency-check database locks ==="
+      find /data -name "*.lck" -type f -delete 2>/dev/null || true
+      echo "Lock cleanup complete. Contents of /data:"
+      ls -la /data/ 2>/dev/null || echo "(empty or not initialized)"
+    volumeMounts:
+    - name: dependency-check-data
+      mountPath: /data
+
   containers:
   # ===========================================================================
   # Golang Container - For running tests and building Go applications

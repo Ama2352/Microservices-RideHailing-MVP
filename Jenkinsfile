@@ -46,13 +46,10 @@ pipeline {
         }
         
         // =====================================================================
-        // Stage 2: Security & Quality Checks (Parallel)
+        // Stage 2: Test & Code Quality (Parallel)
         // =====================================================================
-        stage('Security & Quality Checks') {
+        stage('Test & Code Quality') {
             parallel {
-                // =============================================================
-                // Test Dispatch Service
-                // =============================================================
                 stage('Test Dispatch') {
                     steps {
                         container('golang') {
@@ -67,9 +64,6 @@ pipeline {
                     }
                 }
                 
-                // =============================================================
-                // Test Notification Service
-                // =============================================================
                 stage('Test Notification') {
                     steps {
                         container('golang') {
@@ -83,146 +77,55 @@ pipeline {
                         }
                     }
                 }
-                
-                // =============================================================
-                // Scan Dependencies - OWASP Dependency-Check
-                // Scans go.mod files for known CVEs in Go modules
-                // =============================================================
-                stage('Scan Dependencies') {
-                    steps {
-                        script {
-                            def scanFailed = false
-                            
-                            container('dependency-check') {
-                                echo "=== DEBUG: Environment Information ==="
-                                sh """
-                                    echo "Working directory: \$(pwd)"
-                                    echo "WORKSPACE: \${WORKSPACE}"
-                                    echo "User: \$(whoami)"
-                                    echo "Available space:"
-                                    df -h .
-                                    echo ""
-                                    echo "Dependency-check version:"
-                                    /usr/share/dependency-check/bin/dependency-check.sh --version || echo "Version check failed"
-                                """
-                                
-                                echo "=== DEBUG: Checking service structure ==="
-                                sh """
-                                    echo "Dispatch service files:"
-                                    ls -la services/dispatch/
-                                    echo ""
-                                    echo "Notification service files:"
-                                    ls -la services/notification/
-                                """
-                                
-                                // Create reports directory
-                                sh 'mkdir -p reports/dispatch reports/notification'
-                                
-                                echo "=== Scanning Dispatch Service Dependencies ==="
-                                echo "⏱️ First run: Downloading NVD database (~500MB). This takes 10-15 minutes."
-                                echo "⏱️ Subsequent runs: Cached, completes in 30-60 seconds."
-                                
-                                def dispatchScan = sh(
-                                    script: """
-                                        set -x
-                                        timeout 900 /usr/share/dependency-check/bin/dependency-check.sh \\
-                                            --scan services/dispatch \\
-                                            --format HTML \\
-                                            --format JSON \\
-                                            --project "dispatch-service" \\
-                                            --out reports/dispatch \\
-                                            --enableExperimental \\
-                                            --log /tmp/dc-dispatch.log &
-                                        
-                                        DC_PID=\$!
-                                        echo "Dependency-check PID: \$DC_PID"
-                                        
-                                        # Show progress while it runs
-                                        while kill -0 \$DC_PID 2>/dev/null; do
-                                            echo "⏳ Still running... (check /tmp/dc-dispatch.log for details)"
-                                            sleep 30
-                                        done
-                                        
-                                        wait \$DC_PID
-                                        EXIT_CODE=\$?
-                                        
-                                        echo "Process completed with exit code: \$EXIT_CODE"
-                                        
-                                        if [ -f /tmp/dc-dispatch.log ]; then
-                                            echo "=== Last 20 lines of log ==="
-                                            tail -20 /tmp/dc-dispatch.log
-                                        fi
-                                        
-                                        exit \$EXIT_CODE
-                                    """,
-                                    returnStatus: true
-                                )
-                                
-                                echo "=== DEBUG: Dispatch scan completed with exit code: ${dispatchScan} ==="
-                                sh """
-                                    echo "Checking reports/dispatch directory:"
-                                    ls -la reports/dispatch/ || echo "Directory does not exist"
-                                    echo ""
-                                    echo "Last 50 lines of scan log:"
-                                    tail -50 dispatch-scan.log || echo "Log file not found"
-                                """
-                                
-                                echo "\n=== Scanning Notification Service Dependencies ==="
-                                def notificationScan = sh(
-                                    script: """
-                                        set -x
-                                        /usr/share/dependency-check/bin/dependency-check.sh \\
-                                            --scan services/notification \\
-                                            --format HTML \\
-                                            --format JSON \\
-                                            --project "notification-service" \\
-                                            --out reports/notification \\
-                                            --enableExperimental 2>&1 | tee notification-scan.log
-                                        echo "Exit code: \$?"
-                                    """,
-                                    returnStatus: true
-                                )
-                                
-                                echo "=== DEBUG: Notification scan completed with exit code: ${notificationScan} ==="
-                                sh """
-                                    echo "Checking reports/notification directory:"
-                                    ls -la reports/notification/ || echo "Directory does not exist"
-                                    echo ""
-                                    echo "Last 50 lines of scan log:"
-                                    tail -50 notification-scan.log || echo "Log file not found"
-                                """
-                                
-                                echo "\n=== DEBUG: Final reports directory structure ==="
-                                sh """
-                                    find reports -ls 2>/dev/null || echo "Reports directory not found"
-                                """
-                                
-                                // For now, don't fail - we're debugging
-                                echo "⚠️ DEBUG MODE: Skipping vulnerability check until we confirm reports are generated"
-                            }
-                            
-                            // Archive reports - always run even if scan failed
-                            archiveArtifacts artifacts: 'reports/**/*', allowEmptyArchive: true
-                            echo "📦 Reports archived. Check 'Build Artifacts' in Jenkins UI to download."
-                            
-                            // Check for failures AFTER archiving
-                            if (scanFailed) {
-                                error("Dependency scan failed: HIGH/CRITICAL vulnerabilities detected. Review archived reports and update dependencies.")
-                            }
-                            
-                            echo "\n✓ All dependencies passed security scan"
-                        }
-                    }
+            }
+        }
+        
+        // =====================================================================
+        // Stage 3: Scan Source Dependencies
+        // OWASP Dependency-Check scans go.mod for known CVEs
+        // Fails fast before building if dependencies are vulnerable
+        // First run downloads NVD database (~500MB, takes 10-15 min)
+        // =====================================================================
+        stage('Scan Dependencies') {
+            steps {
+                container('dependency-check') {
+                    sh '''
+                    echo "=== OWASP Dependency-Check ==="
+                    echo "First run: NVD database download (~500MB) takes 10-15 minutes"
+                    echo "Subsequent runs: Uses cache, completes in 30-60 seconds"
+                    echo ""
+                    
+                    mkdir -p reports
+                    
+                    # Scan all services in a single run (more efficient)
+                    /usr/share/dependency-check/bin/dependency-check.sh \
+                        --scan services/dispatch \
+                        --scan services/notification \
+                        --format HTML \
+                        --format JSON \
+                        --project "ride-hailing-services" \
+                        --out reports \
+                        --enableExperimental \
+                        --failOnCVSS 7
+                    
+                    echo ""
+                    echo "✓ Dependency scan complete"
+                    '''
+                }
+            }
+            post {
+                always {
+                    archiveArtifacts artifacts: 'reports/**/*', allowEmptyArchive: true
                 }
             }
         }
         
         // =====================================================================
-        // Stage 3: Build & Push Images with BuildKit
-        // Single build per service with multiple tags
-        // Cache stored in registry for persistence across pod restarts
+        // Stage 4: Build Images
+        // BuildKit builds and pushes atomically for efficiency and caching
+        // Images are tagged with build number - not yet approved for deployment
         // =====================================================================
-        stage('Build & Push Images') {
+        stage('Build Images') {
             steps {
                 container('buildkit') {
                     withCredentials([
@@ -270,11 +173,11 @@ DOCKERAUTH
         }
         
         // =====================================================================
-        // Stage 4: Security Scan - Container Images
-        // Scans built images for vulnerabilities before pushing to registry
-        // Fails pipeline on HIGH or CRITICAL severity findings
+        // Stage 5: Scan Container Images
+        // Trivy scans images from registry for OS and application vulnerabilities
+        // Gates deployment - only clean images proceed to production
         // =====================================================================
-        stage('Security Scan - Images') {
+        stage('Scan Images') {
             steps {
                 container('trivy') {
                     script {
@@ -331,9 +234,9 @@ DOCKERAUTH
         }
         
         // =====================================================================
-        // Stage 5: Deploy to Kubernetes
+        // Stage 6: Deploy to Kubernetes
+        // Only reached if all security scans pass
         // Uses envsubst for reliable variable substitution
-        // Note: ride-hailing namespace is pre-created by install-jenkins.sh
         // =====================================================================
         stage('Deploy to Kubernetes') {
             steps {
@@ -360,9 +263,9 @@ DOCKERAUTH
         }
         
         // =====================================================================
-        // Stage 6: Verify Deployment
+        // Stage 7: Verify Deployment
         // =====================================================================
-        stage('Verify') {
+        stage('Verify Deployment') {
             steps {
                 container('kubectl') {
                     sh '''
