@@ -20,9 +20,6 @@ pipeline {
         // =================================================================
         DOCKER_REGISTRY = "${env.DOCKER_REGISTRY ?: 'docker.io/your-dockerhub-username'}"
         
-        // Kubernetes Configuration
-        K8S_NAMESPACE = 'ride-hailing'
-        
         // Build Configuration
         IMAGE_TAG = "${env.BUILD_NUMBER}-${env.GIT_COMMIT?.take(7) ?: 'latest'}"
     }
@@ -49,10 +46,13 @@ pipeline {
         }
         
         // =====================================================================
-        // Stage 2: Test Services (Parallel)
+        // Stage 2: Security & Quality Checks (Parallel)
         // =====================================================================
-        stage('Test Services') {
+        stage('Security & Quality Checks') {
             parallel {
+                // =============================================================
+                // Test Dispatch Service
+                // =============================================================
                 stage('Test Dispatch') {
                     steps {
                         container('golang') {
@@ -66,6 +66,10 @@ pipeline {
                         }
                     }
                 }
+                
+                // =============================================================
+                // Test Notification Service
+                // =============================================================
                 stage('Test Notification') {
                     steps {
                         container('golang') {
@@ -75,6 +79,75 @@ pipeline {
                                     go vet ./...
                                     go test -v ./... || echo "No tests yet"
                                 '''
+                            }
+                        }
+                    }
+                }
+                
+                // =============================================================
+                // Scan Dependencies - OWASP Dependency-Check
+                // Scans go.mod files for known CVEs in Go modules
+                // =============================================================
+                stage('Scan Dependencies') {
+                    steps {
+                        container('dependency-check') {
+                            script {
+                                def scanFailed = false
+                                
+                                echo "=== Scanning Dispatch Service Dependencies ==="
+                                def dispatchScan = sh(
+                                    script: """
+                                        /usr/share/dependency-check/bin/dependency-check.sh \\
+                                            --scan services/dispatch/go.mod \\
+                                            --format HTML \\
+                                            --format JSON \\
+                                            --project "dispatch-service" \\
+                                            --out reports/dispatch \\
+                                            --failOnCVSS 7 \\
+                                            --enableExperimental \\
+                                            --nvdApiKey \${NVD_API_KEY:-}
+                                    """,
+                                    returnStatus: true
+                                )
+                                
+                                if (dispatchScan != 0) {
+                                    echo "⚠️ SECURITY ALERT: Dispatch service has HIGH/CRITICAL dependency vulnerabilities!"
+                                    scanFailed = true
+                                } else {
+                                    echo "✓ Dispatch dependencies: No HIGH/CRITICAL vulnerabilities found"
+                                }
+                                
+                                echo "\n=== Scanning Notification Service Dependencies ==="
+                                def notificationScan = sh(
+                                    script: """
+                                        /usr/share/dependency-check/bin/dependency-check.sh \\
+                                            --scan services/notification/go.mod \\
+                                            --format HTML \\
+                                            --format JSON \\
+                                            --project "notification-service" \\
+                                            --out reports/notification \\
+                                            --failOnCVSS 7 \\
+                                            --enableExperimental \\
+                                            --nvdApiKey \${NVD_API_KEY:-}
+                                    """,
+                                    returnStatus: true
+                                )
+                                
+                                if (notificationScan != 0) {
+                                    echo "⚠️ SECURITY ALERT: Notification service has HIGH/CRITICAL dependency vulnerabilities!"
+                                    scanFailed = true
+                                } else {
+                                    echo "✓ Notification dependencies: No HIGH/CRITICAL vulnerabilities found"
+                                }
+                                
+                                // Archive reports for review
+                                archiveArtifacts artifacts: 'reports/**/*', allowEmptyArchive: true
+                                
+                                if (scanFailed) {
+                                    error("Dependency scan failed: HIGH/CRITICAL vulnerabilities detected. Review archived reports and update dependencies.")
+                                }
+                                
+                                echo "\n✓ All dependencies passed security scan"
                             }
                         }
                     }

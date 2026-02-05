@@ -1,0 +1,70 @@
+apiVersion: install.istio.io/v1alpha1
+kind: IstioOperator
+metadata:
+  name: istio-minimal
+spec:
+  profile: minimal
+
+  # Mesh configuration
+  meshConfig:
+    accessLogFile: /dev/stdout
+    defaultConfig:
+      proxyMetadata:
+        ISTIO_META_DNS_CAPTURE: "true"
+
+  components:
+    # Control Plane (istiod) - Reduced resources
+    pilot:
+      enabled: true
+      k8s:
+        replicaCount: 1
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+
+    # Ingress Gateway - Essential for external traffic
+    ingressGateways:
+      - name: istio-ingressgateway
+        enabled: true
+        k8s:
+          replicaCount: 1
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+          service:
+            type: NodePort
+            ports:
+              - name: http2
+                port: 80
+                targetPort: 8080
+                nodePort: 30080
+              - name: https
+                port: 443
+                targetPort: 8443
+                nodePort: 30443
+
+    # Disable Egress Gateway (not needed for MVP)
+    egressGateways:
+      - name: istio-egressgateway
+        enabled: false
+
+  # Global settings
+  values:
+    global:
+      proxy:
+        resources:
+          requests:
+            cpu: 10m
+            memory: 40Mi
+          limits:
+            cpu: 100m
+            memory: 128Mi
+

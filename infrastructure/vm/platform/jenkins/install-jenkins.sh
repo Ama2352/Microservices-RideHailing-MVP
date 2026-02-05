@@ -8,10 +8,10 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SERVICES_DIR="$(cd "${SCRIPT_DIR}/../../../.." && pwd)/services"
 
-echo ">>> [1/5] Creating Jenkins namespace and RBAC..."
+echo ">>> [1/6] Creating Jenkins namespace and RBAC..."
 kubectl apply -f "${SCRIPT_DIR}/00-namespace.yaml"
 
-echo ">>> [2/5] Creating ride-hailing namespace (target for deployments)..."
+echo ">>> [2/6] Creating ride-hailing namespace (target for deployments)..."
 if [ -f "${SERVICES_DIR}/namespace.yaml" ]; then
     kubectl apply -f "${SERVICES_DIR}/namespace.yaml"
 else
@@ -20,15 +20,18 @@ else
     kubectl label namespace ride-hailing istio-injection=enabled --overwrite
 fi
 
-echo ">>> [3/5] Setting up RBAC and storage..."
+echo ">>> [3/6] Setting up RBAC and storage..."
 kubectl apply -f "${SCRIPT_DIR}/01-rbac.yaml"
 kubectl apply -f "${SCRIPT_DIR}/02-storage.yaml"
 
-echo ">>> [4/5] Deploying Jenkins..."
+echo ">>> [4/6] Deploying Jenkins..."
 kubectl apply -f "${SCRIPT_DIR}/03-deployment.yaml"
 kubectl apply -f "${SCRIPT_DIR}/04-service.yaml"
 
-echo ">>> [5/5] Waiting for Jenkins to be ready (this may take 2-3 minutes)..."
+echo ">>> [5/6] Setting up Dependency-Check storage..."
+kubectl apply -f "${SCRIPT_DIR}/05-dependency-check-storage.yaml"
+
+echo ">>> [6/6] Waiting for Jenkins to be ready (this may take 2-3 minutes)..."
 kubectl -n jenkins rollout status deployment/jenkins --timeout=300s
 
 # Get initial admin password

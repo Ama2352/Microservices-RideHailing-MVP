@@ -19,7 +19,7 @@ COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o notification-service .
 
 # --- Runtime Stage ---
-FROM alpine:3.19
+FROM alpine:3.20
 
 # Security: Run as non-root user
 RUN addgroup -g 1000 appgroup && \

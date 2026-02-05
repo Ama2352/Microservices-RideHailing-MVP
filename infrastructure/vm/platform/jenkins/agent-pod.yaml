@@ -84,3 +84,32 @@ spec:
       limits:
         memory: "256Mi"
         cpu: "200m"
+  
+  # ===========================================================================
+  # OWASP Dependency-Check Container - For scanning application dependencies
+  # Scans go.mod files for known CVEs in Go modules
+  # Uses persistent volume for NVD database cache
+  # ===========================================================================
+  - name: dependency-check
+    image: owasp/dependency-check:9.0.9
+    command:
+    - cat
+    tty: true
+    resources:
+      requests:
+        memory: "512Mi"
+        cpu: "200m"
+      limits:
+        memory: "1Gi"
+        cpu: "500m"
+    volumeMounts:
+    - name: dependency-check-data
+      mountPath: /usr/share/dependency-check/data
+  
+  # ===========================================================================
+  # Volumes - Persistent storage for caching security scan databases
+  # ===========================================================================
+  volumes:
+  - name: dependency-check-data
+    persistentVolumeClaim:
+      claimName: dependency-check-data

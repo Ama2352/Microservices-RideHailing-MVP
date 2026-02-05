@@ -1,0 +1,36 @@
+# =============================================================================
+# PersistentVolume and PersistentVolumeClaim for OWASP Dependency-Check
+# Stores NVD (National Vulnerability Database) cache to avoid re-downloading
+# Database size: ~500MB-1GB, updated periodically
+# =============================================================================
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: dependency-check-data
+spec:
+  capacity:
+    storage: 2Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: local-storage
+  # hostPath is simple for local dev/learning clusters
+  # For production: use NFS, Ceph, or cloud provider storage
+  hostPath:
+    path: /var/jenkins-cache/dependency-check
+    type: DirectoryOrCreate
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: dependency-check-data
+  namespace: jenkins
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-storage
+  resources:
+    requests:
+      storage: 2Gi
