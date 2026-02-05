@@ -139,18 +139,24 @@ pipeline {
                                 } else {
                                     echo "✓ Notification dependencies: No HIGH/CRITICAL vulnerabilities found"
                                 }
-                                
+                            }
+                        }
+                        
+                        // Archive reports FIRST - must run outside container context and before error
+                        script {
+                            archiveArtifacts artifacts: 'reports/**/*', allowEmptyArchive: true
+                            echo "📦 Reports archived. Check 'Build Artifacts' in Jenkins UI to download."
+                        }
+                        
+                        // Check for failures AFTER archiving
+                        container('dependency-check') {
+                            script {
                                 if (scanFailed) {
                                     error("Dependency scan failed: HIGH/CRITICAL vulnerabilities detected. Review archived reports and update dependencies.")
                                 }
                                 
                                 echo "\n✓ All dependencies passed security scan"
                             }
-                        }
-                        
-                        // Archive reports - must run outside container context for Jenkins to access
-                        script {
-                            archiveArtifacts artifacts: 'reports/**/*', allowEmptyArchive: true
                         }
                     }
                 }
