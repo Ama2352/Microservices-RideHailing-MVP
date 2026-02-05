@@ -102,7 +102,7 @@ pipeline {
                                             --format HTML \\
                                             --format JSON \\
                                             --project "dispatch-service" \\
-                                            --out reports/dispatch \\
+                                            --out \${WORKSPACE}/reports/dispatch \\
                                             --failOnCVSS 7 \\
                                             --enableExperimental \\
                                             --nvdApiKey \${NVD_API_KEY:-}
@@ -125,7 +125,7 @@ pipeline {
                                             --format HTML \\
                                             --format JSON \\
                                             --project "notification-service" \\
-                                            --out reports/notification \\
+                                            --out \${WORKSPACE}/reports/notification \\
                                             --failOnCVSS 7 \\
                                             --enableExperimental \\
                                             --nvdApiKey \${NVD_API_KEY:-}
@@ -139,6 +139,13 @@ pipeline {
                                 } else {
                                     echo "✓ Notification dependencies: No HIGH/CRITICAL vulnerabilities found"
                                 }
+                                
+                                // Debug: List created files
+                                echo "\n=== Checking generated reports ==="
+                                sh """
+                                    ls -la \${WORKSPACE}/reports/ || echo "Reports directory not found"
+                                    find \${WORKSPACE}/reports -type f || echo "No report files found"
+                                """
                             }
                             
                             // Archive reports - always run even if scan failed
