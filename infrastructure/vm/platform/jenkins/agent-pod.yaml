@@ -15,17 +15,17 @@ spec:
   # Golang Container - For running tests and building Go applications
   # ===========================================================================
   - name: golang
-    image: golang:1.23-alpine
+    image: golang:1.21-alpine
     command:
     - cat
     tty: true
     resources:
       requests:
-        memory: "256Mi"
-        cpu: "100m"
+        memory: "384Mi"
+        cpu: "200m"
       limits:
-        memory: "512Mi"
-        cpu: "500m"
+        memory: "1Gi"
+        cpu: "1000m"
   
   # ===========================================================================
   # BuildKit Container - For building container images without Docker daemon

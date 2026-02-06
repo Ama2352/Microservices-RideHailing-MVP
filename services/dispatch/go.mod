@@ -1,3 +1,3 @@
-module github.com/uitgo/dispatch-service
+module dispatch-service
 
-go 1.21
+go 1.25.6

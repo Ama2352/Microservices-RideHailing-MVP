@@ -1,3 +1,3 @@
-module github.com/uitgo/notification-service
+module notification-service
 
-go 1.21
+go 1.25.6
