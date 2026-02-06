@@ -46,11 +46,9 @@ pipeline {
         }
         
         // =====================================================================
-        // Stage 2: Test, Vet & Vulnerability Scan (Parallel)
-        // Uses govulncheck - Go's official vulnerability scanner
-        // Lightweight, fast, no database download needed
+        // Stage 2: Test & Code Quality (Parallel)
         // =====================================================================
-        stage('Test & Security') {
+        stage('Test') {
             parallel {
                 stage('Test Dispatch') {
                     steps {
@@ -79,42 +77,42 @@ pipeline {
                         }
                     }
                 }
-                
-                // =============================================================
-                // Scan Dependencies with govulncheck
-                // Go's official vulnerability scanner (golang.org/x/vuln)
-                // Checks go.mod against the Go Vulnerability Database
-                // Fast (~10s), no heavy database download needed
-                // =============================================================
-                stage('Scan Dependencies') {
-                    steps {
-                        container('golang') {
-                            sh '''
-                            echo "=== Installing govulncheck ==="
-                            go install golang.org/x/vuln/cmd/govulncheck@latest
-                            
-                            echo ""
-                            echo "=== Scanning Dispatch Service ==="
-                            cd services/dispatch
-                            govulncheck ./...
-                            cd ../.. 
-                            
-                            echo ""
-                            echo "=== Scanning Notification Service ==="
-                            cd services/notification
-                            govulncheck ./...
-                            
-                            echo ""
-                            echo "✓ All dependencies passed vulnerability scan"
-                            '''
-                        }
-                    }
+            }
+        }
+        
+        // =====================================================================
+        // Stage 3: Scan Dependencies
+        // Uses govulncheck - Go's official vulnerability scanner (golang.org/x/vuln)
+        // Checks go.mod against the Go Vulnerability Database
+        // Fast (~10s), no heavy database download needed
+        // =====================================================================
+        stage('Scan Dependencies') {
+            steps {
+                container('golang') {
+                    sh '''
+                    echo "=== Installing govulncheck ==="
+                    go install golang.org/x/vuln/cmd/govulncheck@latest
+                    
+                    echo ""
+                    echo "=== Scanning Dispatch Service ==="
+                    cd services/dispatch
+                    govulncheck ./...
+                    cd ../.. 
+                    
+                    echo ""
+                    echo "=== Scanning Notification Service ==="
+                    cd services/notification
+                    govulncheck ./...
+                    
+                    echo ""
+                    echo "✓ All dependencies passed vulnerability scan"
+                    '''
                 }
             }
         }
         
         // =====================================================================
-        // Stage 3: Build Images
+        // Stage 4: Build Images
         // BuildKit builds and pushes atomically for efficiency and caching
         // Images are tagged with build number - not yet approved for deployment
         // =====================================================================
@@ -166,7 +164,7 @@ DOCKERAUTH
         }
         
         // =====================================================================
-        // Stage 4: Scan Container Images
+        // Stage 5: Scan Container Images
         // Trivy scans images from registry for OS and application vulnerabilities
         // Gates deployment - only clean images proceed to production
         // =====================================================================
@@ -227,7 +225,7 @@ DOCKERAUTH
         }
         
         // =====================================================================
-        // Stage 5: Deploy to Kubernetes
+        // Stage 6: Deploy to Kubernetes
         // Only reached if all security scans pass
         // Uses envsubst for reliable variable substitution
         // =====================================================================
@@ -256,7 +254,7 @@ DOCKERAUTH
         }
         
         // =====================================================================
-        // Stage 6: Verify Deployment
+        // Stage 7: Verify Deployment
         // =====================================================================
         stage('Verify Deployment') {
             steps {

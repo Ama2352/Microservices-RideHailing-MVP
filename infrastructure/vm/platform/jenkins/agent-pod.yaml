@@ -15,16 +15,16 @@ spec:
   # Golang Container - For running tests and building Go applications
   # ===========================================================================
   - name: golang
-    image: golang:1.21-alpine
+    image: golang:1.25.7-alpine
     command:
     - cat
     tty: true
     resources:
       requests:
-        memory: "384Mi"
+        memory: "256Mi"
         cpu: "200m"
       limits:
-        memory: "1Gi"
+        memory: "768Mi"
         cpu: "1000m"
   
   # ===========================================================================
