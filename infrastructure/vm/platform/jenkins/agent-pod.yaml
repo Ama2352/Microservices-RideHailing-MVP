@@ -11,16 +11,12 @@ spec:
   serviceAccountName: jenkins
   
   # ===========================================================================
-  # Node Selection - Pin agent to master node where hostPath PV exists
+  # Node Selection - Pin agent to same node as Jenkins and storage PVs
   # Required because dependency-check-data PV uses hostPath storage
   # For production: use shared storage (NFS/Ceph) and remove this constraint
   # ===========================================================================
   nodeSelector:
-    kubernetes.io/hostname: k8s-master
-  tolerations:
-  - key: "node-role.kubernetes.io/control-plane"
-    operator: "Exists"
-    effect: "NoSchedule"
+    kubernetes.io/hostname: k8s-worker-2
   
   # ===========================================================================
   # Init Container - Clean stale database locks before main containers start
