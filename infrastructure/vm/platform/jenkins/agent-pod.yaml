@@ -124,7 +124,7 @@ spec:
   # Uses persistent volume for NVD database cache
   # ===========================================================================
   - name: dependency-check
-    image: owasp/dependency-check:9.0.9
+    image: owasp/dependency-check:10.0.2
     command:
     - cat
     tty: true
@@ -145,4 +145,4 @@ spec:
   volumes:
   - name: dependency-check-data
     persistentVolumeClaim:
-      claimName: dependency-check-data
+      claimName: dependency-check-pvc

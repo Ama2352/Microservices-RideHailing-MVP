@@ -15,6 +15,15 @@ spec:
   hostPath:
     path: /data/jenkins
     type: DirectoryOrCreate
+  # Required: Pin this PV to a specific node since hostPath is node-local
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+      - matchExpressions:
+        - key: kubernetes.io/hostname
+          operator: In
+          values:
+          - k8s-worker-2
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
