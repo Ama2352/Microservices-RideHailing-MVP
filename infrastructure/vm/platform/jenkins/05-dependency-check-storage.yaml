@@ -31,7 +31,7 @@ spec:
         - key: kubernetes.io/hostname
           operator: In
           values:
-          - k8s-master
+          - k8s-worker-2
 
 ---
 apiVersion: v1

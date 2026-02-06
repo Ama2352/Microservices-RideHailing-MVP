@@ -84,33 +84,36 @@ pipeline {
         // Stage 3: Scan Source Dependencies
         // OWASP Dependency-Check scans go.mod for known CVEs
         // Fails fast before building if dependencies are vulnerable
-        // First run downloads NVD database (~500MB, takes 10-15 min)
+        // Requires NVD API key (free): https://nvd.nist.gov/developers/request-an-api-key
         // =====================================================================
         stage('Scan Dependencies') {
             steps {
                 container('dependency-check') {
-                    sh '''
-                    echo "=== OWASP Dependency-Check ==="
-                    echo "First run: NVD database download (~500MB) takes 10-15 minutes"
-                    echo "Subsequent runs: Uses cache, completes in 30-60 seconds"
-                    echo ""
-                    
-                    mkdir -p reports
-                    
-                    # Scan all services in a single run (more efficient)
-                    /usr/share/dependency-check/bin/dependency-check.sh \
-                        --scan services/dispatch \
-                        --scan services/notification \
-                        --format HTML \
-                        --format JSON \
-                        --project "ride-hailing-services" \
-                        --out reports \
-                        --enableExperimental \
-                        --failOnCVSS 7
-                    
-                    echo ""
-                    echo "✓ Dependency scan complete"
-                    '''
+                    withCredentials([string(credentialsId: 'nvd-api-key', variable: 'NVD_API_KEY')]) {
+                        sh '''
+                        echo "=== OWASP Dependency-Check ==="
+                        echo "Using NVD API key for database download"
+                        echo ""
+                        
+                        mkdir -p reports
+                        
+                        # Scan all services in a single run (more efficient)
+                        /usr/share/dependency-check/bin/dependency-check.sh \
+                            --scan services/dispatch \
+                            --scan services/notification \
+                            --format HTML \
+                            --format JSON \
+                            --project "ride-hailing-services" \
+                            --out reports \
+                            --enableExperimental \
+                            --failOnCVSS 7 \
+                            --nvdApiKey "${NVD_API_KEY}"
+                            --nvdApiDelay 8000
+                        
+                        echo ""
+                        echo "✓ Dependency scan complete"
+                        '''
+                    }
                 }
             }
             post {
