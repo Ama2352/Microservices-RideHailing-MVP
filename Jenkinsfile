@@ -46,9 +46,11 @@ pipeline {
         }
         
         // =====================================================================
-        // Stage 2: Test & Code Quality (Parallel)
+        // Stage 2: Test, Vet & Vulnerability Scan (Parallel)
+        // Uses govulncheck - Go's official vulnerability scanner
+        // Lightweight, fast, no database download needed
         // =====================================================================
-        stage('Test & Code Quality') {
+        stage('Test & Security') {
             parallel {
                 stage('Test Dispatch') {
                     steps {
@@ -77,54 +79,42 @@ pipeline {
                         }
                     }
                 }
-            }
-        }
-        
-        // =====================================================================
-        // Stage 3: Scan Source Dependencies
-        // OWASP Dependency-Check scans go.mod for known CVEs
-        // Fails fast before building if dependencies are vulnerable
-        // Requires NVD API key (free): https://nvd.nist.gov/developers/request-an-api-key
-        // =====================================================================
-        stage('Scan Dependencies') {
-            steps {
-                container('dependency-check') {
-                    withCredentials([string(credentialsId: 'nvd-api-key', variable: 'NVD_API_KEY')]) {
-                        sh '''
-                        echo "=== OWASP Dependency-Check ==="
-                        echo "Using NVD API key for database download"
-                        echo ""
-                        
-                        mkdir -p reports
-                        
-                        # Scan all services in a single run (more efficient)
-                        /usr/share/dependency-check/bin/dependency-check.sh \
-                            --scan services/dispatch \
-                            --scan services/notification \
-                            --format HTML \
-                            --format JSON \
-                            --project "ride-hailing-services" \
-                            --out reports \
-                            --enableExperimental \
-                            --failOnCVSS 7 \
-                            --nvdApiKey "${NVD_API_KEY}"
-                            --nvdApiDelay 8000
-                        
-                        echo ""
-                        echo "✓ Dependency scan complete"
-                        '''
+                
+                // =============================================================
+                // Scan Dependencies with govulncheck
+                // Go's official vulnerability scanner (golang.org/x/vuln)
+                // Checks go.mod against the Go Vulnerability Database
+                // Fast (~10s), no heavy database download needed
+                // =============================================================
+                stage('Scan Dependencies') {
+                    steps {
+                        container('golang') {
+                            sh '''
+                            echo "=== Installing govulncheck ==="
+                            go install golang.org/x/vuln/cmd/govulncheck@latest
+                            
+                            echo ""
+                            echo "=== Scanning Dispatch Service ==="
+                            cd services/dispatch
+                            govulncheck ./...
+                            cd ../.. 
+                            
+                            echo ""
+                            echo "=== Scanning Notification Service ==="
+                            cd services/notification
+                            govulncheck ./...
+                            
+                            echo ""
+                            echo "✓ All dependencies passed vulnerability scan"
+                            '''
+                        }
                     }
                 }
             }
-            post {
-                always {
-                    archiveArtifacts artifacts: 'reports/**/*', allowEmptyArchive: true
-                }
-            }
         }
         
         // =====================================================================
-        // Stage 4: Build Images
+        // Stage 3: Build Images
         // BuildKit builds and pushes atomically for efficiency and caching
         // Images are tagged with build number - not yet approved for deployment
         // =====================================================================
@@ -176,7 +166,7 @@ DOCKERAUTH
         }
         
         // =====================================================================
-        // Stage 5: Scan Container Images
+        // Stage 4: Scan Container Images
         // Trivy scans images from registry for OS and application vulnerabilities
         // Gates deployment - only clean images proceed to production
         // =====================================================================
@@ -237,7 +227,7 @@ DOCKERAUTH
         }
         
         // =====================================================================
-        // Stage 6: Deploy to Kubernetes
+        // Stage 5: Deploy to Kubernetes
         // Only reached if all security scans pass
         // Uses envsubst for reliable variable substitution
         // =====================================================================
@@ -266,7 +256,7 @@ DOCKERAUTH
         }
         
         // =====================================================================
-        // Stage 7: Verify Deployment
+        // Stage 6: Verify Deployment
         // =====================================================================
         stage('Verify Deployment') {
             steps {
