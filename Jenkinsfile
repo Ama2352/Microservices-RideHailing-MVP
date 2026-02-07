@@ -325,9 +325,22 @@ DOCKERAUTH
         success {
             echo "Pipeline completed successfully!"
             echo "Deployed version: ${IMAGE_TAG}"
+
+            mail(
+                to: "honguyenminhsang2005@gmail.com",
+                subject: "CI/CD Pipeline Success - Build #${env.BUILD_NUMBER}",
+                body: "CI/CD pipeline completed successfully."
+            )
         }
+
         failure {
             echo "Pipeline failed! Check logs for details."
+
+            mail(
+                to: "honguyenminhsang2005@gmail.com",
+                subject: "CI/CD Pipeline Failure - Build #${env.BUILD_NUMBER}",
+                body: "CI/CD pipeline failed."
+            )
         }
     }
 }
