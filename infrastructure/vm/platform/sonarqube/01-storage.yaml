@@ -1,0 +1,33 @@
+# =============================================================================
+# SonarQube Persistent Storage
+# Stores analysis data, project history, and embedded database
+# =============================================================================
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: sonarqube-pv
+spec:
+  storageClassName: sonarqube-storage
+  capacity:
+    storage: 2Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  hostPath:
+    path: /data/sonarqube
+    type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: sonarqube-pvc
+  namespace: sonarqube
+  labels:
+    app: sonarqube
+spec:
+  storageClassName: sonarqube-storage
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi

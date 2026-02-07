@@ -9,7 +9,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 echo ">>> Removing Jenkins resources..."
 
-kubectl delete -f "${SCRIPT_DIR}/05-dependency-check-storage.yaml" --ignore-not-found=true
 kubectl delete -f "${SCRIPT_DIR}/04-service.yaml" --ignore-not-found=true
 kubectl delete -f "${SCRIPT_DIR}/03-deployment.yaml" --ignore-not-found=true
 kubectl delete -f "${SCRIPT_DIR}/02-storage.yaml" --ignore-not-found=true

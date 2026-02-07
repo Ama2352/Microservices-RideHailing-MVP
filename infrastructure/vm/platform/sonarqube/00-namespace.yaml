@@ -1,0 +1,10 @@
+# =============================================================================
+# SonarQube Namespace
+# Isolates SonarQube from other platform components
+# =============================================================================
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: sonarqube
+  labels:
+    app: sonarqube

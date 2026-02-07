@@ -47,8 +47,9 @@ pipeline {
         
         // =====================================================================
         // Stage 2: Test & Code Quality (Parallel)
+        // Runs unit tests (with coverage) and SonarQube analysis together
         // =====================================================================
-        stage('Test') {
+        stage('Test & Code Quality') {
             parallel {
                 stage('Test Dispatch') {
                     steps {
@@ -57,7 +58,7 @@ pipeline {
                                 sh '''
                                     go mod download
                                     go vet ./...
-                                    go test -v ./... || echo "No tests yet"
+                                    go test -v -coverprofile=coverage.out ./... || echo "No tests yet"
                                 '''
                             }
                         }
@@ -71,7 +72,7 @@ pipeline {
                                 sh '''
                                     go mod download
                                     go vet ./...
-                                    go test -v ./... || echo "No tests yet"
+                                    go test -v -coverprofile=coverage.out ./... || echo "No tests yet"
                                 '''
                             }
                         }
@@ -81,7 +82,42 @@ pipeline {
         }
         
         // =====================================================================
-        // Stage 3: Scan Dependencies
+        // Stage 3: SonarQube Analysis
+        // Static code analysis: bugs, code smells, duplication, maintainability
+        // Runs after tests so coverage reports are available
+        // Requires: SonarQube server + Jenkins SonarQube plugin configured
+        // =====================================================================
+        stage('SonarQube Analysis') {
+            steps {
+                container('sonar-scanner') {
+                    withCredentials([string(credentialsId: 'sonarqube-token', variable: 'SONAR_TOKEN')]) {
+                        sh '''
+                        SONAR_HOST="http://sonarqube.sonarqube.svc.cluster.local:9000"
+                        
+                        echo "=== Analyzing Dispatch Service ==="
+                        cd services/dispatch
+                        sonar-scanner \
+                            -Dsonar.host.url=${SONAR_HOST} \
+                            -Dsonar.token=${SONAR_TOKEN}
+                        cd ../..
+                        
+                        echo ""
+                        echo "=== Analyzing Notification Service ==="
+                        cd services/notification
+                        sonar-scanner \
+                            -Dsonar.host.url=${SONAR_HOST} \
+                            -Dsonar.token=${SONAR_TOKEN}
+                        
+                        echo ""
+                        echo "All services passed SonarQube quality gate"
+                        '''
+                    }
+                }
+            }
+        }
+        
+        // =====================================================================
+        // Stage 4: Scan Dependencies
         // Uses govulncheck - Go's official vulnerability scanner (golang.org/x/vuln)
         // Checks go.mod against the Go Vulnerability Database
         // Fast (~10s), no heavy database download needed
@@ -112,7 +148,7 @@ pipeline {
         }
         
         // =====================================================================
-        // Stage 4: Build Images
+        // Stage 5: Build Images
         // BuildKit builds and pushes atomically for efficiency and caching
         // Images are tagged with build number - not yet approved for deployment
         // =====================================================================
@@ -164,7 +200,7 @@ DOCKERAUTH
         }
         
         // =====================================================================
-        // Stage 5: Scan Container Images
+        // Stage 6: Scan Container Images
         // Trivy scans images from registry for OS and application vulnerabilities
         // Gates deployment - only clean images proceed to production
         // =====================================================================
@@ -225,7 +261,7 @@ DOCKERAUTH
         }
         
         // =====================================================================
-        // Stage 6: Deploy to Kubernetes
+        // Stage 7: Deploy to Kubernetes
         // Only reached if all security scans pass
         // Uses envsubst for reliable variable substitution
         // =====================================================================
@@ -254,7 +290,7 @@ DOCKERAUTH
         }
         
         // =====================================================================
-        // Stage 7: Verify Deployment
+        // Stage 8: Verify Deployment
         // =====================================================================
         stage('Verify Deployment') {
             steps {

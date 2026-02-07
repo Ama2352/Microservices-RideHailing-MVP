@@ -70,6 +70,23 @@ spec:
         cpu: "100m"
   
   # ===========================================================================
+  # SonarQube Scanner Container - For static code analysis (SAST)
+  # Analyzes source code for bugs, code smells, duplication
+  # ===========================================================================
+  - name: sonar-scanner
+    image: sonarsource/sonar-scanner-cli:11.3
+    command:
+    - cat
+    tty: true
+    resources:
+      requests:
+        memory: "256Mi"
+        cpu: "100m"
+      limits:
+        memory: "512Mi"
+        cpu: "500m"
+
+  # ===========================================================================
   # Trivy Container - For security scanning of container images
   # Scans for vulnerabilities in OS packages and application dependencies
   # ===========================================================================
