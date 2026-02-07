@@ -167,3 +167,35 @@ data:
       - job_name: 'prometheus'
         static_configs:
           - targets: ['localhost:9090']
+
+      # ---------------------------------------------------------------------------
+      # 7. Jenkins
+      # Build stats, queue size, executors, JVM metrics
+      # Requires Prometheus Metrics Plugin in Jenkins
+      # ---------------------------------------------------------------------------
+      - job_name: 'jenkins'
+        metrics_path: /prometheus
+        scheme: http
+
+        kubernetes_sd_configs:
+          - role: service
+
+        relabel_configs:
+          # Only scrape Jenkins service
+          - source_labels: [__meta_kubernetes_service_name]
+            action: keep
+            regex: jenkins
+
+          # Only scrape Jenkins namespace
+          - source_labels: [__meta_kubernetes_namespace]
+            action: keep
+            regex: jenkins   # change if your namespace is different
+
+          # Set instance label to service name
+          - source_labels: [__meta_kubernetes_service_name]
+            action: replace
+            target_label: instance
+
+          - source_labels: [__meta_kubernetes_namespace]
+            action: replace
+            target_label: namespace
