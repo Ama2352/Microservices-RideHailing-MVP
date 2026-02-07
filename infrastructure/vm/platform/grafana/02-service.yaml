@@ -1,0 +1,21 @@
+# =============================================================================
+# Grafana Service
+# NodePort for external access from host machine
+# =============================================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana
+  namespace: monitoring
+  labels:
+    app: grafana
+spec:
+  type: NodePort
+  selector:
+    app: grafana
+  ports:
+    - name: http
+      protocol: TCP
+      port: 3000          # Internal cluster port
+      targetPort: 3000    # Container port
+      nodePort: 30300     # External access port (http://<node-ip>:30300)

@@ -6,6 +6,9 @@ import (
 	"net/http"
 	"os"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 // Config holds service configuration
@@ -23,6 +26,72 @@ type HealthResponse struct {
 	Timestamp string `json:"timestamp"`
 }
 
+// =============================================================================
+// Prometheus Metrics
+// =============================================================================
+var (
+	// Counter: total HTTP requests by method, path, and status
+	httpRequestsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "http_requests_total",
+			Help: "Total number of HTTP requests processed",
+		},
+		[]string{"method", "path", "status"},
+	)
+
+	// Histogram: request duration in seconds
+	httpRequestDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "http_request_duration_seconds",
+			Help:    "HTTP request latency in seconds",
+			Buckets: prometheus.DefBuckets,
+		},
+		[]string{"method", "path"},
+	)
+)
+
+func init() {
+	prometheus.MustRegister(httpRequestsTotal)
+	prometheus.MustRegister(httpRequestDuration)
+}
+
+// =============================================================================
+// Middleware: Request Instrumentation
+// =============================================================================
+
+// statusWriter wraps ResponseWriter to capture the status code
+type statusWriter struct {
+	http.ResponseWriter
+	status int
+}
+
+func (w *statusWriter) WriteHeader(code int) {
+	w.status = code
+	w.ResponseWriter.WriteHeader(code)
+}
+
+// metricsMiddleware instruments HTTP requests with Prometheus metrics
+func metricsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Skip instrumenting the metrics endpoint itself
+		if r.URL.Path == "/metrics" {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		start := time.Now()
+		wrapped := &statusWriter{ResponseWriter: w, status: http.StatusOK}
+
+		next.ServeHTTP(wrapped, r)
+
+		duration := time.Since(start).Seconds()
+		status := http.StatusText(wrapped.status)
+
+		httpRequestsTotal.WithLabelValues(r.Method, r.URL.Path, status).Inc()
+		httpRequestDuration.WithLabelValues(r.Method, r.URL.Path).Observe(duration)
+	})
+}
+
 func main() {
 	config := Config{
 		Port:        getEnv("PORT", "8080"),
@@ -31,6 +100,9 @@ func main() {
 	}
 
 	mux := http.NewServeMux()
+
+	// Prometheus metrics endpoint
+	mux.Handle("/metrics", promhttp.Handler())
 
 	// Health check endpoint
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
@@ -61,8 +133,11 @@ func main() {
 		})
 	})
 
+	// Wrap mux with metrics middleware
+	handler := metricsMiddleware(mux)
+
 	log.Printf("Starting %s on port %s", config.ServiceName, config.Port)
-	if err := http.ListenAndServe(":"+config.Port, mux); err != nil {
+	if err := http.ListenAndServe(":"+config.Port, handler); err != nil {
 		log.Fatalf("Failed to start server: %v", err)
 	}
 }

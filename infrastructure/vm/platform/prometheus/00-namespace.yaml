@@ -1,0 +1,10 @@
+# =============================================================================
+# Monitoring Namespace
+# Isolate observability stack from application workloads
+# =============================================================================
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring
+  labels:
+    name: monitoring

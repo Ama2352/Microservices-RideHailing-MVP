@@ -1,0 +1,169 @@
+# =============================================================================
+# Prometheus Configuration
+# Defines scrape targets and service discovery rules
+# =============================================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+  namespace: monitoring
+data:
+  prometheus.yml: |
+    # =============================================================================
+    # Global Configuration
+    # =============================================================================
+    global:
+      scrape_interval: 15s        # How often to scrape targets
+      evaluation_interval: 15s     # How often to evaluate alert rules
+      external_labels:
+        cluster: 'ridehailing-local'
+        environment: 'development'
+
+    # =============================================================================
+    # Scrape Configurations
+    # =============================================================================
+    scrape_configs:
+      # ---------------------------------------------------------------------------
+      # 1. Kubernetes Pods with Prometheus Annotations
+      # Auto-discovers pods with prometheus.io/scrape=true
+      # ---------------------------------------------------------------------------
+      - job_name: 'kubernetes-pods'
+        kubernetes_sd_configs:
+          - role: pod
+        
+        relabel_configs:
+          # Only scrape pods with prometheus.io/scrape=true annotation
+          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+            action: keep
+            regex: true
+          
+          # Use custom metrics path if specified (default: /metrics)
+          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+            action: replace
+            target_label: __metrics_path__
+            regex: (.+)
+          
+          # Use custom port if specified (default: pod's declared port)
+          - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+            action: replace
+            regex: ([^:]+)(?::\d+)?;(\d+)
+            replacement: $1:$2
+            target_label: __address__
+          
+          # Add namespace label
+          - source_labels: [__meta_kubernetes_namespace]
+            action: replace
+            target_label: namespace
+          
+          # Add pod name label
+          - source_labels: [__meta_kubernetes_pod_name]
+            action: replace
+            target_label: pod
+          
+          # Add app label (from pod label)
+          - source_labels: [__meta_kubernetes_pod_label_app]
+            action: replace
+            target_label: app
+          
+          # Add node name label
+          - source_labels: [__meta_kubernetes_pod_node_name]
+            action: replace
+            target_label: node
+
+      # ---------------------------------------------------------------------------
+      # 2. Kubernetes Nodes (Kubelet Metrics)
+      # Scrapes container and node stats from kubelet
+      # ---------------------------------------------------------------------------
+      - job_name: 'kubernetes-nodes'
+        kubernetes_sd_configs:
+          - role: node
+        
+        scheme: https
+        tls_config:
+          ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+          insecure_skip_verify: true
+        bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+        
+        relabel_configs:
+          # Add node name label
+          - source_labels: [__meta_kubernetes_node_name]
+            action: replace
+            target_label: node
+
+      # ---------------------------------------------------------------------------
+      # 3. Kubernetes Nodes (cAdvisor - Container Metrics)
+      # Detailed container resource usage
+      # ---------------------------------------------------------------------------
+      - job_name: 'kubernetes-cadvisor'
+        kubernetes_sd_configs:
+          - role: node
+        
+        scheme: https
+        metrics_path: /metrics/cadvisor
+        tls_config:
+          ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+          insecure_skip_verify: true
+        bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+        
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_node_name]
+            action: replace
+            target_label: node
+
+      # ---------------------------------------------------------------------------
+      # 4. Node Exporter (Host-Level Metrics)
+      # CPU, memory, disk, network stats per VM
+      # Will be deployed in next phase
+      # ---------------------------------------------------------------------------
+      - job_name: 'node-exporter'
+        kubernetes_sd_configs:
+          - role: pod
+        
+        relabel_configs:
+          # Only scrape pods with app=node-exporter
+          - source_labels: [__meta_kubernetes_pod_label_app]
+            action: keep
+            regex: node-exporter
+          
+          - source_labels: [__meta_kubernetes_namespace]
+            action: replace
+            target_label: namespace
+          
+          - source_labels: [__meta_kubernetes_pod_node_name]
+            action: replace
+            target_label: node
+
+      # ---------------------------------------------------------------------------
+      # 5. Istio Envoy Sidecars (Service Mesh Metrics)
+      # Request rate, latency, error rate between services
+      # ---------------------------------------------------------------------------
+      - job_name: 'envoy-stats'
+        metrics_path: /stats/prometheus
+        kubernetes_sd_configs:
+          - role: pod
+        
+        relabel_configs:
+          # Only scrape pods with Istio sidecar (port name: http-envoy-prom)
+          - source_labels: [__meta_kubernetes_pod_container_port_name]
+            action: keep
+            regex: '.*-envoy-prom'
+          
+          - source_labels: [__meta_kubernetes_namespace]
+            action: replace
+            target_label: namespace
+          
+          - source_labels: [__meta_kubernetes_pod_name]
+            action: replace
+            target_label: pod
+          
+          - source_labels: [__meta_kubernetes_pod_label_app]
+            action: replace
+            target_label: app
+
+      # ---------------------------------------------------------------------------
+      # 6. Prometheus Self-Monitoring
+      # Monitor Prometheus itself
+      # ---------------------------------------------------------------------------
+      - job_name: 'prometheus'
+        static_configs:
+          - targets: ['localhost:9090']

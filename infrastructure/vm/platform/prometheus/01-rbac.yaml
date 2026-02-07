@@ -1,0 +1,61 @@
+# =============================================================================
+# Prometheus RBAC Configuration
+# Grants Prometheus read-only cluster-wide access for service discovery
+# =============================================================================
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: prometheus
+  namespace: monitoring
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: prometheus
+rules:
+  # Access to nodes and node metrics
+  - apiGroups: [""]
+    resources:
+      - nodes
+      - nodes/metrics
+      - nodes/proxy
+    verbs: ["get", "list", "watch"]
+  
+  # Access to services and endpoints for service discovery
+  - apiGroups: [""]
+    resources:
+      - services
+      - endpoints
+      - pods
+    verbs: ["get", "list", "watch"]
+  
+  # Access to ingresses
+  - apiGroups: ["networking.k8s.io"]
+    resources:
+      - ingresses
+    verbs: ["get", "list", "watch"]
+  
+  # Access to ConfigMaps (for potential config reload)
+  - apiGroups: [""]
+    resources:
+      - configmaps
+    verbs: ["get"]
+  
+  # Non-resource URLs for metrics scraping
+  - nonResourceURLs:
+      - /metrics
+      - /metrics/cadvisor
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: prometheus
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: prometheus
+subjects:
+  - kind: ServiceAccount
+    name: prometheus
+    namespace: monitoring

@@ -9,7 +9,7 @@ FROM golang:1.25.7-alpine AS builder
 WORKDIR /app
 
 # Copy dependency files first (cache optimization)
-COPY go.mod ./
+COPY go.mod go.sum ./
 RUN go mod download
 
 # Copy source code

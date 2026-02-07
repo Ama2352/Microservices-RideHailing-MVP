@@ -1,0 +1,89 @@
+# =============================================================================
+# Grafana Deployment
+# Visualization and dashboarding for Prometheus metrics
+# =============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+  namespace: monitoring
+  labels:
+    app: grafana
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: grafana
+  template:
+    metadata:
+      labels:
+        app: grafana
+    spec:
+      securityContext:
+        fsGroup: 472
+        runAsUser: 472
+        runAsNonRoot: true
+      
+      containers:
+        - name: grafana
+          image: grafana/grafana:10.4.2
+          ports:
+            - name: http
+              containerPort: 3000
+              protocol: TCP
+          
+          env:
+            # Disable analytics and update checks
+            - name: GF_ANALYTICS_REPORTING_ENABLED
+              value: "false"
+            - name: GF_ANALYTICS_CHECK_FOR_UPDATES
+              value: "false"
+            
+            # Anonymous access for learning environment
+            - name: GF_AUTH_ANONYMOUS_ENABLED
+              value: "true"
+            - name: GF_AUTH_ANONYMOUS_ORG_ROLE
+              value: "Admin"
+            
+            # Disable login form (skip authentication)
+            - name: GF_AUTH_DISABLE_LOGIN_FORM
+              value: "true"
+            
+            # Server configuration
+            - name: GF_SERVER_ROOT_URL
+              value: "http://localhost:3000"
+          
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "200m"
+          
+          volumeMounts:
+            - name: datasources
+              mountPath: /etc/grafana/provisioning/datasources
+          
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+          
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+      
+      volumes:
+        - name: datasources
+          configMap:
+            name: grafana-datasources
