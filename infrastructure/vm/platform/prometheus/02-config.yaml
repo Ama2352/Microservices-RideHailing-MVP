@@ -176,26 +176,51 @@ data:
       - job_name: 'jenkins'
         metrics_path: /prometheus
         scheme: http
+        static_configs:
+          - targets: ['jenkins.jenkins.svc.cluster.local:8080']
+            labels:
+              service: jenkins
+              namespace: jenkins
 
+      # ---------------------------------------------------------------------------
+      # 8. Istio Control Plane (Istiod)
+      # Pilot, configuration, certificate management metrics
+      # ---------------------------------------------------------------------------
+      - job_name: 'istio-control-plane'
         kubernetes_sd_configs:
-          - role: service
-
+          - role: endpoints
+            namespaces:
+              names:
+                - istio-system
+        
         relabel_configs:
-          # Only scrape Jenkins service
-          - source_labels: [__meta_kubernetes_service_name]
+          # Keep only istiod endpoints
+          - source_labels: [__meta_kubernetes_service_name, __meta_kubernetes_endpoint_port_name]
             action: keep
-            regex: jenkins
-
-          # Only scrape Jenkins namespace
-          - source_labels: [__meta_kubernetes_namespace]
-            action: keep
-            regex: jenkins   # change if your namespace is different
-
-          # Set instance label to service name
-          - source_labels: [__meta_kubernetes_service_name]
-            action: replace
-            target_label: instance
-
+            regex: istiod;http-monitoring
+          
           - source_labels: [__meta_kubernetes_namespace]
             action: replace
             target_label: namespace
+          
+          - source_labels: [__meta_kubernetes_pod_name]
+            action: replace
+            target_label: pod
+
+      # ---------------------------------------------------------------------------
+      # 9. Kubernetes API Server
+      # Cluster-level API metrics
+      # ---------------------------------------------------------------------------
+      - job_name: 'kubernetes-apiservers'
+        kubernetes_sd_configs:
+          - role: endpoints
+        
+        scheme: https
+        tls_config:
+          ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+        bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+        
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_namespace, __meta_kubernetes_service_name, __meta_kubernetes_endpoint_port_name]
+            action: keep
+            regex: default;kubernetes;https

@@ -395,7 +395,11 @@ To get node IPs:
 
 Deployment successful at: ${new Date()}
 
-Full logs: ${env.BUILD_URL}console
+View Build:
+------------------
+Blue Ocean:    http://jenkins.local:30808/blue/organizations/jenkins/ride-hailing-services/detail/ride-hailing-services/${env.BUILD_NUMBER}/pipeline
+Console:       http://jenkins.local:30808/job/ride-hailing-services/${env.BUILD_NUMBER}/console
+Classic View:  http://jenkins.local:30808/job/ride-hailing-services/${env.BUILD_NUMBER}/
 ===========================================
 """
             )
@@ -461,7 +465,11 @@ kubectl -n ride-hailing get pods,svc
 
 Failed at: ${new Date()}
 
-Full Console Output: ${env.BUILD_URL}console
+View Build (Blue Ocean shows failed stage clearly):
+------------------
+Blue Ocean:    http://jenkins.local:30808/blue/organizations/jenkins/ride-hailing-services/detail/ride-hailing-services/${env.BUILD_NUMBER}/pipeline
+Console:       http://jenkins.local:30808/job/ride-hailing-services/${env.BUILD_NUMBER}/console
+Classic View:  http://jenkins.local:30808/job/ride-hailing-services/${env.BUILD_NUMBER}/
 ===========================================
 """
             )
