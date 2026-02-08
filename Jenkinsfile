@@ -297,21 +297,45 @@ DOCKERAUTH
             steps {
                 container('kubectl') {
                     sh '''
+                    set -e
+                    
                     # Deploy Kubernetes resources with envsubst for reliable substitution
                     export DOCKER_REGISTRY="${DOCKER_REGISTRY}"
                     export IMAGE_TAG="${IMAGE_TAG}"
                     
-                    # Deploy Dispatch Service (K8s + Istio)
+                    echo "=== Deploying Dispatch Service ==="
                     cat services/dispatch/k8s.yaml | envsubst | kubectl apply -f -
                     kubectl apply -f services/dispatch/istio.yaml
                     
-                    # Deploy Notification Service (K8s + Istio)
+                    echo ""
+                    echo "=== Deploying Notification Service ==="
                     cat services/notification/k8s.yaml | envsubst | kubectl apply -f -
                     kubectl apply -f services/notification/istio.yaml
                     
-                    # Wait for rollout
-                    kubectl -n ride-hailing rollout status deployment/dispatch-service --timeout=120s
-                    kubectl -n ride-hailing rollout status deployment/notification-service --timeout=120s
+                    echo ""
+                    echo "=== Checking pod status before rollout ==="
+                    kubectl -n ride-hailing get pods
+                    
+                    echo ""
+                    echo "=== Waiting for Dispatch Service rollout ==="
+                    if ! kubectl -n ride-hailing rollout status deployment/dispatch-service --timeout=300s; then
+                        echo "⚠️ Dispatch rollout timeout - showing debug info:"
+                        kubectl -n ride-hailing get pods -l app=dispatch-service
+                        kubectl -n ride-hailing describe pods -l app=dispatch-service | tail -50
+                        exit 1
+                    fi
+                    
+                    echo ""
+                    echo "=== Waiting for Notification Service rollout ==="
+                    if ! kubectl -n ride-hailing rollout status deployment/notification-service --timeout=300s; then
+                        echo "⚠️ Notification rollout timeout - showing debug info:"
+                        kubectl -n ride-hailing get pods -l app=notification-service
+                        kubectl -n ride-hailing describe pods -l app=notification-service | tail -50
+                        exit 1
+                    fi
+                    
+                    echo ""
+                    echo "✓ All deployments rolled out successfully"
                     '''
                 }
             }
