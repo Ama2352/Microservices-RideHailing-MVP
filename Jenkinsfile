@@ -46,10 +46,10 @@ pipeline {
         }
         
         // =====================================================================
-        // Stage 2: Test & Code Quality (Parallel)
-        // Runs unit tests (with coverage) and SonarQube analysis together
+        // Stage 2: Automated Tests (Parallel)
+        // Executes unit tests and coverage checks across services in parallel
         // =====================================================================
-        stage('Test & Code Quality') {
+        stage('Automated Tests') {
             parallel {
                 stage('Test Dispatch') {
                     steps {
@@ -148,11 +148,96 @@ pipeline {
         }
         
         // =====================================================================
-        // Stage 5: Build Images
-        // BuildKit builds and pushes atomically for efficiency and caching
-        // Images are tagged with build number - not yet approved for deployment
+        // Stage 5: Build Images (Local Only)
+        // BuildKit builds images to Docker tar format for Trivy scanning
+        // Images are NOT pushed yet - must pass security scan first
         // =====================================================================
         stage('Build Images') {
+            steps {
+                container('buildkit') {
+                    sh '''
+                    set -e
+                    
+                    echo "=== Building Dispatch Service ==="
+                    buildctl build \
+                        --frontend dockerfile.v0 \
+                        --local context=./services/dispatch \
+                        --local dockerfile=./services/dispatch \
+                        --output type=docker,name=dispatch-service:scan,dest=dispatch-service.tar
+                    
+                    echo "=== Building Notification Service ==="
+                    buildctl build \
+                        --frontend dockerfile.v0 \
+                        --local context=./services/notification \
+                        --local dockerfile=./services/notification \
+                        --output type=docker,name=notification-service:scan,dest=notification-service.tar
+                    
+                    echo "✓ Images built successfully (not pushed yet)"
+                    ls -lh *.tar
+                    '''
+                }
+            }
+        }
+        
+        // =====================================================================
+        // Stage 6: Scan Container Images
+        // Trivy scans LOCAL image tars for OS and application vulnerabilities
+        // SECURITY GATE: Only clean images proceed to push stage
+        // =====================================================================
+        stage('Scan Images') {
+            steps {
+                container('trivy') {
+                    sh '''
+                    set -e
+                    SCAN_FAILED=0
+                    
+                    echo "=== Scanning Dispatch Service Image ==="
+                    if ! trivy image \
+                        --input dispatch-service.tar \
+                        --severity HIGH,CRITICAL \
+                        --exit-code 1 \
+                        --no-progress \
+                        --format table; then
+                        echo "⚠️ SECURITY ALERT: Dispatch service has HIGH/CRITICAL vulnerabilities!"
+                        SCAN_FAILED=1
+                    else
+                        echo "✓ Dispatch service: No HIGH/CRITICAL vulnerabilities found"
+                    fi
+                    
+                    echo ""
+                    echo "=== Scanning Notification Service Image ==="
+                    if ! trivy image \
+                        --input notification-service.tar \
+                        --severity HIGH,CRITICAL \
+                        --exit-code 1 \
+                        --no-progress \
+                        --format table; then
+                        echo "⚠️ SECURITY ALERT: Notification service has HIGH/CRITICAL vulnerabilities!"
+                        SCAN_FAILED=1
+                    else
+                        echo "✓ Notification service: No HIGH/CRITICAL vulnerabilities found"
+                    fi
+                    
+                    if [ $SCAN_FAILED -eq 1 ]; then
+                        echo ""
+                        echo "❌ Security scan failed: HIGH/CRITICAL vulnerabilities detected."
+                        echo "Images will NOT be pushed to registry."
+                        exit 1
+                    fi
+                    
+                    echo ""
+                    echo "✓ All images passed security scan - approved for push"
+                    '''
+                }
+            }
+        }
+        
+        // =====================================================================
+        // Stage 7: Push Validated Images
+        // Only reached if security scans pass
+        // Pushes clean images to registry with proper tags and caching
+        // =====================================================================
+        stage('Push Images') {
             steps {
                 container('buildkit') {
                     withCredentials([
@@ -161,7 +246,9 @@ pipeline {
                             passwordVariable: 'DOCKER_PASS')
                     ]) {
                         sh '''
-                        # Configure registry authentication for BuildKit
+                        set -e
+                        
+                        # Configure registry authentication
                         mkdir -p /root/.docker
                         cat > /root/.docker/config.json <<DOCKERAUTH
 {
@@ -174,7 +261,7 @@ pipeline {
 }
 DOCKERAUTH
                         
-                        echo "=== Building Dispatch Service ==="
+                        echo "=== Pushing Dispatch Service ==="
                         buildctl build \
                             --frontend dockerfile.v0 \
                             --local context=./services/dispatch \
@@ -184,7 +271,7 @@ DOCKERAUTH
                             --export-cache type=registry,ref=${DOCKER_REGISTRY}/dispatch-service:buildcache,mode=max \
                             --import-cache type=registry,ref=${DOCKER_REGISTRY}/dispatch-service:buildcache
                         
-                        echo "=== Building Notification Service ==="
+                        echo "=== Pushing Notification Service ==="
                         buildctl build \
                             --frontend dockerfile.v0 \
                             --local context=./services/notification \
@@ -193,6 +280,8 @@ DOCKERAUTH
                             --output type=image,name=${DOCKER_REGISTRY}/notification-service:latest,push=true \
                             --export-cache type=registry,ref=${DOCKER_REGISTRY}/notification-service:buildcache,mode=max \
                             --import-cache type=registry,ref=${DOCKER_REGISTRY}/notification-service:buildcache
+                        
+                        echo "✓ All validated images pushed to registry"
                         '''
                     }
                 }
@@ -200,69 +289,8 @@ DOCKERAUTH
         }
         
         // =====================================================================
-        // Stage 6: Scan Container Images
-        // Trivy scans images from registry for OS and application vulnerabilities
-        // Gates deployment - only clean images proceed to production
-        // =====================================================================
-        stage('Scan Images') {
-            steps {
-                container('trivy') {
-                    script {
-                        def scanFailed = false
-                        
-                        echo "=== Scanning Dispatch Service Image ==="
-                        def dispatchScan = sh(
-                            script: """
-                                trivy image \
-                                    --severity HIGH,CRITICAL \
-                                    --exit-code 1 \
-                                    --no-progress \
-                                    --format table \
-                                    ${DOCKER_REGISTRY}/dispatch-service:${IMAGE_TAG}
-                            """,
-                            returnStatus: true
-                        )
-                        
-                        if (dispatchScan != 0) {
-                            echo "⚠️ SECURITY ALERT: Dispatch service has HIGH/CRITICAL vulnerabilities!"
-                            scanFailed = true
-                        } else {
-                            echo "✓ Dispatch service: No HIGH/CRITICAL vulnerabilities found"
-                        }
-                        
-                        echo "\n=== Scanning Notification Service Image ==="
-                        def notificationScan = sh(
-                            script: """
-                                trivy image \
-                                    --severity HIGH,CRITICAL \
-                                    --exit-code 1 \
-                                    --no-progress \
-                                    --format table \
-                                    ${DOCKER_REGISTRY}/notification-service:${IMAGE_TAG}
-                            """,
-                            returnStatus: true
-                        )
-                        
-                        if (notificationScan != 0) {
-                            echo "⚠️ SECURITY ALERT: Notification service has HIGH/CRITICAL vulnerabilities!"
-                            scanFailed = true
-                        } else {
-                            echo "✓ Notification service: No HIGH/CRITICAL vulnerabilities found"
-                        }
-                        
-                        if (scanFailed) {
-                            error("Security scan failed: HIGH/CRITICAL vulnerabilities detected. Fix vulnerabilities before deployment.")
-                        }
-                        
-                        echo "\n✓ All images passed security scan"
-                    }
-                }
-            }
-        }
-        
-        // =====================================================================
-        // Stage 7: Deploy to Kubernetes
-        // Only reached if all security scans pass
+        // Stage 8: Deploy to Kubernetes
+        // Only reached if all security scans pass and images are pushed
         // Uses envsubst for reliable variable substitution
         // =====================================================================
         stage('Deploy to Kubernetes') {
@@ -290,7 +318,7 @@ DOCKERAUTH
         }
         
         // =====================================================================
-        // Stage 8: Verify Deployment
+        // Stage 9: Verify Deployment
         // =====================================================================
         stage('Verify Deployment') {
             steps {
