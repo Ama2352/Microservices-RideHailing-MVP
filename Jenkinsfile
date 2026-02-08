@@ -368,7 +368,6 @@ Git Commit:       ${env.GIT_COMMIT}
 Git Branch:       ${env.GIT_BRANCH ?: 'N/A'}
 Image Tag:        ${IMAGE_TAG}
 Build Duration:   ${currentBuild.durationString}
-Build URL:        ${env.BUILD_URL}
 
 Deployed Images:
 ------------------
@@ -425,7 +424,6 @@ Git Commit:       ${env.GIT_COMMIT}
 Git Branch:       ${env.GIT_BRANCH}
 Failed Stage:     ${env.STAGE_NAME}
 Build Duration:   ${currentBuild.durationString}
-Build URL:        ${env.BUILD_URL}
 
 Failure Analysis:
 ------------------
@@ -447,7 +445,7 @@ Security Alert:
 
 Action Required:
 ------------------
-1. Review full logs: ${env.BUILD_URL}console
+1. Review full logs in Jenkins console
 2. Check security scan results if applicable
 3. Fix root cause before triggering new build
 4. Do NOT bypass security gates

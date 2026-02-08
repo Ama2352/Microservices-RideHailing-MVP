@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -21,7 +22,6 @@ type Config struct {
 type HealthResponse struct {
 	Status    string `json:"status"`
 	Service   string `json:"service"`
-	Version   string `json:"version"`
 	Timestamp string `json:"timestamp"`
 }
 
@@ -47,16 +47,22 @@ var (
 		},
 		[]string{"method", "path"},
 	)
+
+	// Ensure metrics are only registered once
+	metricsOnce sync.Once
 )
 
 func init() {
-	// Register custom metrics
-	prometheus.MustRegister(httpRequestsTotal)
-	prometheus.MustRegister(httpRequestDuration)
-	
-	// Register Go runtime metrics (memory, goroutines, GC)
-	prometheus.MustRegister(prometheus.NewGoCollector())
-	prometheus.MustRegister(prometheus.NewProcessCollector(prometheus.ProcessCollectorOpts{}))
+	registerMetrics()
+}
+
+// registerMetrics safely registers all Prometheus metrics once
+func registerMetrics() {
+	metricsOnce.Do(func() {
+		// Register custom metrics
+		prometheus.MustRegister(httpRequestsTotal)
+		prometheus.MustRegister(httpRequestDuration)
+	})
 }
 
 // =============================================================================
@@ -96,40 +102,24 @@ func metricsMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// setupRouter creates and configures the HTTP router with all endpoints
+// setupRouter creates and configures the HTTP router
 func setupRouter(config Config) *http.ServeMux {
 	mux := http.NewServeMux()
 
-	// Prometheus metrics endpoint
+	// Prometheus metrics endpoint (required for monitoring)
 	mux.Handle("/metrics", promhttp.Handler())
 
-	// Health check endpoint
+	// Health check endpoint (main application endpoint)
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		response := HealthResponse{
 			Status:    "healthy",
 			Service:   config.ServiceName,
-			Version:   config.Version,
 			Timestamp: time.Now().UTC().Format(time.RFC3339),
 		}
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(response)
-	})
-
-	// Readiness probe
-	mux.HandleFunc("/ready", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("ready"))
-	})
-
-	// Root endpoint
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{
-			"message": "Notification Service - Ride-Hailing MVP",
-			"version": config.Version,
-		})
 	})
 
 	return mux
