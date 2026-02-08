@@ -1,0 +1,33 @@
+# =============================================================================
+# Grafana Persistent Storage
+# Stores dashboards, configurations, plugins, and user preferences
+# Uses hostPath for bare-metal setup (non-production pattern for learning)
+# Production: Use dynamic provisioning (Rook, Longhorn, NFS)
+# =============================================================================
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: grafana-pv
+spec:
+  storageClassName: grafana-storage
+  capacity:
+    storage: 5Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  hostPath:
+    path: /data/grafana
+    type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: grafana-pvc
+  namespace: monitoring
+spec:
+  storageClassName: grafana-storage
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi

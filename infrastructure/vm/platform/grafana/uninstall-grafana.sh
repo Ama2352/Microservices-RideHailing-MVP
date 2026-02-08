@@ -48,10 +48,14 @@ fi
 log_info "Removing ${COMPONENT}..."
 
 log_info "Deleting service..."
-kubectl delete -f "${MANIFEST_DIR}/02-service.yaml" --ignore-not-found=true
+kubectl delete -f "${MANIFEST_DIR}/03-service.yaml" --ignore-not-found=true
 
 log_info "Deleting deployment..."
-kubectl delete -f "${MANIFEST_DIR}/01-deployment.yaml" --ignore-not-found=true
+kubectl delete -f "${MANIFEST_DIR}/02-deployment.yaml" --ignore-not-found=true
+
+log_info "Deleting persistent storage..."
+kubectl delete -f "${MANIFEST_DIR}/01-storage.yaml" --ignore-not-found=true
+kubectl delete pv grafana-pv --ignore-not-found=true
 
 log_info "Deleting datasource configuration..."
 kubectl delete -f "${MANIFEST_DIR}/00-datasource.yaml" --ignore-not-found=true
@@ -67,6 +71,9 @@ REMAINING_PODS=$(kubectl -n ${NAMESPACE} get pods -l app=grafana --no-headers 2>
 if [ "$REMAINING_PODS" -eq 0 ]; then
     echo ""
     log_info "${COMPONENT} uninstalled successfully!"
+    echo ""
+    log_warn "Persistent data remains at: /data/grafana on k8s-worker-2"
+    log_warn "To fully clean up: ssh k8s-worker-2 'sudo rm -rf /data/grafana'"
 else
     log_warn "Some pods still terminating. Check: kubectl -n ${NAMESPACE} get pods -l app=grafana"
 fi

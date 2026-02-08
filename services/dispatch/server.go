@@ -50,8 +50,13 @@ var (
 )
 
 func init() {
+	// Register custom metrics
 	prometheus.MustRegister(httpRequestsTotal)
 	prometheus.MustRegister(httpRequestDuration)
+	
+	// Register Go runtime metrics (memory, goroutines, GC)
+	prometheus.MustRegister(prometheus.NewGoCollector())
+	prometheus.MustRegister(prometheus.NewProcessCollector(prometheus.ProcessCollectorOpts{}))
 }
 
 // =============================================================================

@@ -69,11 +69,14 @@ fi
 log_info "Creating Prometheus datasource configuration"
 kubectl apply -f "${MANIFEST_DIR}/00-datasource.yaml"
 
+log_info "Creating persistent storage"
+kubectl apply -f "${MANIFEST_DIR}/01-storage.yaml"
+
 log_info "Deploying ${COMPONENT}"
-kubectl apply -f "${MANIFEST_DIR}/01-deployment.yaml"
+kubectl apply -f "${MANIFEST_DIR}/02-deployment.yaml"
 
 log_info "Creating service"
-kubectl apply -f "${MANIFEST_DIR}/02-service.yaml"
+kubectl apply -f "${MANIFEST_DIR}/03-service.yaml"
 
 # -----------------------------------------------------------------------------
 # Wait for deployment
@@ -120,6 +123,10 @@ NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="
 
 echo ""
 log_info "${COMPONENT} installation completed successfully!"
+echo ""
+echo "Storage:"
+echo "  - Data persisted at: /data/grafana on k8s-worker-2"
+echo "  - Dashboards and settings will survive pod restarts"
 echo ""
 echo "Access Grafana UI:"
 echo "  URL: http://${NODE_IP}:${NODE_PORT}"
