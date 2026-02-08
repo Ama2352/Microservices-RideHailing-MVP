@@ -323,35 +323,26 @@ DOCKERAUTH
         stage('Verify Deployment') {
             steps {
                 container('kubectl') {
-                    script {
-                        // Capture node IP for email notification
-                        env.NODE_IP = sh(
-                            script: "kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type==\"InternalIP\")].address}'",
-                            returnStdout: true
-                        ).trim()
-                        
-                        sh """
-                        echo "=== Deployment Status ==="
-                        kubectl -n ride-hailing get pods -o wide
-                        
-                        echo "=== Service Endpoints ==="
-                        kubectl -n ride-hailing get svc
-                        
-                        echo "=== Istio Configuration ==="
-                        kubectl -n ride-hailing get gateway,virtualservice,destinationrule
-                        
-                        echo "=== Istio Sidecar Check ==="
-                        kubectl -n ride-hailing get pods -o jsonpath='{range .items[*]}{.metadata.name}{": "}{.spec.containers[*].name}{"\\n"}{end}'
-                        
-                        echo "=== Ingress Gateway ==="
-                        kubectl -n istio-system get svc istio-ingressgateway
-                        
-                        echo ""
-                        echo "API Endpoints (via NodePort 30080):"
-                        echo "  Dispatch:      http://${env.NODE_IP}:30080/dispatch/health"
-                        echo "  Notification:  http://${env.NODE_IP}:30080/notification/health"
-                        """
-                    }
+                    sh '''
+                    echo "=== Deployment Status ==="
+                    kubectl -n ride-hailing get pods -o wide
+                    
+                    echo "=== Service Endpoints ==="
+                    kubectl -n ride-hailing get svc
+                    
+                    echo "=== Istio Configuration ==="
+                    kubectl -n ride-hailing get gateway,virtualservice,destinationrule
+                    
+                    echo "=== Istio Sidecar Check ==="
+                    kubectl -n ride-hailing get pods -o jsonpath='{range .items[*]}{.metadata.name}{": "}{.spec.containers[*].name}{"\\n"}{end}'
+                    
+                    echo "=== Ingress Gateway ==="
+                    kubectl -n istio-system get svc istio-ingressgateway
+                    
+                    echo ""
+                    echo "✓ Deployment verified successfully"
+                    echo "Access services via NodePort 30080 on any cluster node"
+                    '''
                 }
             }
         }
@@ -362,13 +353,10 @@ DOCKERAUTH
             echo "✓ Pipeline completed successfully!"
             echo "Deployed version: ${IMAGE_TAG}"
             
-            script {
-                def nodeIP = env.NODE_IP ?: "<node-ip>"
-                
-                mail(
-                    to: "honguyenminhsang2005@gmail.com",
-                    subject: "✓ CI/CD Pipeline Success - Build #${env.BUILD_NUMBER}",
-                    body: """
+            mail(
+                to: "honguyenminhsang2005@gmail.com",
+                subject: "✓ CI/CD Pipeline Success - Build #${env.BUILD_NUMBER}",
+                body: """
 ===========================================
 ✓ CI/CD PIPELINE SUCCESS
 ===========================================
@@ -377,15 +365,15 @@ Build Information:
 ------------------
 Build Number:     #${env.BUILD_NUMBER}
 Git Commit:       ${env.GIT_COMMIT}
-Git Branch:       ${env.GIT_BRANCH}
+Git Branch:       ${env.GIT_BRANCH ?: 'N/A'}
 Image Tag:        ${IMAGE_TAG}
 Build Duration:   ${currentBuild.durationString}
 Build URL:        ${env.BUILD_URL}
 
 Deployed Images:
 ------------------
-Dispatch Service:      ${DOCKER_REGISTRY}/dispatch-service:${IMAGE_TAG}
-Notification Service:  ${DOCKER_REGISTRY}/notification-service:${IMAGE_TAG}
+${DOCKER_REGISTRY}/dispatch-service:${IMAGE_TAG}
+${DOCKER_REGISTRY}/notification-service:${IMAGE_TAG}
 
 Security Validation:
 ------------------
@@ -394,30 +382,27 @@ Security Validation:
 ✓ Dependency Scan Passed (govulncheck)
 ✓ Container Image Scan Passed (Trivy)
 
-Service Endpoints:
+Access Services:
 ------------------
-Dispatch:     http://${nodeIP}:30080/dispatch/health
-Notification: http://${nodeIP}:30080/notification/health
+Services are exposed via Istio Ingress Gateway on NodePort 30080
 
-Test Commands:
-------------------
-curl http://${nodeIP}:30080/dispatch/health
-curl http://${nodeIP}:30080/notification/health
+Test endpoints (replace <NODE-IP> with any cluster node IP):
+  curl http://<NODE-IP>:30080/dispatch/health
+  curl http://<NODE-IP>:30080/notification/health
+
+To get node IPs:
+  kubectl get nodes -o wide
 
 Deployment successful at: ${new Date()}
 
-Jenkins Job: ${env.BUILD_URL}console
+Full logs: ${env.BUILD_URL}console
 ===========================================
 """
-                )
-            }
+            )
         }
 
         failure {
             echo "✗ Pipeline failed! Check logs for details."
-            
-            script {
-                def nodeIP = env.NODE_IP ?: "<node-ip>"
                 
                 mail(
                     to: "honguyenminhsang2005@gmail.com",
@@ -479,8 +464,8 @@ Failed at: ${new Date()}
 Full Console Output: ${env.BUILD_URL}console
 ===========================================
 """
-                )
-            }
+            )
         }
     }
 }
+
