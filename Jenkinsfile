@@ -323,27 +323,35 @@ DOCKERAUTH
         stage('Verify Deployment') {
             steps {
                 container('kubectl') {
-                    sh '''
-                    echo "=== Deployment Status ==="
-                    kubectl -n ride-hailing get pods -o wide
-                    
-                    echo "=== Service Endpoints ==="
-                    kubectl -n ride-hailing get svc
-                    
-                    echo "=== Istio Configuration ==="
-                    kubectl -n ride-hailing get gateway,virtualservice,destinationrule
-                    
-                    echo "=== Istio Sidecar Check ==="
-                    kubectl -n ride-hailing get pods -o jsonpath='{range .items[*]}{.metadata.name}{": "}{.spec.containers[*].name}{"\\n"}{end}'
-                    
-                    echo "=== Ingress Gateway ==="
-                    kubectl -n istio-system get svc istio-ingressgateway
-                    
-                    echo ""
-                    echo "API Endpoints (via NodePort 30080):"
-                    echo "  Dispatch:      http://<node-ip>:30080/dispatch/health"
-                    echo "  Notification:  http://<node-ip>:30080/notification/health"
-                    '''
+                    script {
+                        // Capture node IP for email notification
+                        env.NODE_IP = sh(
+                            script: "kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type==\"InternalIP\")].address}'",
+                            returnStdout: true
+                        ).trim()
+                        
+                        sh """
+                        echo "=== Deployment Status ==="
+                        kubectl -n ride-hailing get pods -o wide
+                        
+                        echo "=== Service Endpoints ==="
+                        kubectl -n ride-hailing get svc
+                        
+                        echo "=== Istio Configuration ==="
+                        kubectl -n ride-hailing get gateway,virtualservice,destinationrule
+                        
+                        echo "=== Istio Sidecar Check ==="
+                        kubectl -n ride-hailing get pods -o jsonpath='{range .items[*]}{.metadata.name}{": "}{.spec.containers[*].name}{"\\n"}{end}'
+                        
+                        echo "=== Ingress Gateway ==="
+                        kubectl -n istio-system get svc istio-ingressgateway
+                        
+                        echo ""
+                        echo "API Endpoints (via NodePort 30080):"
+                        echo "  Dispatch:      http://${env.NODE_IP}:30080/dispatch/health"
+                        echo "  Notification:  http://${env.NODE_IP}:30080/notification/health"
+                        """
+                    }
                 }
             }
         }
@@ -355,7 +363,7 @@ DOCKERAUTH
             echo "Deployed version: ${IMAGE_TAG}"
             
             script {
-                def nodeIP = sh(script: "kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type==\"InternalIP\")].address}'", returnStdout: true).trim()
+                def nodeIP = env.NODE_IP ?: "<node-ip>"
                 
                 mail(
                     to: "honguyenminhsang2005@gmail.com",
@@ -409,8 +417,7 @@ Jenkins Job: ${env.BUILD_URL}console
             echo "✗ Pipeline failed! Check logs for details."
             
             script {
-                def failedStage = currentBuild.rawBuild.getAction(jenkins.model.InterruptedBuildAction.class)?.causes?.first()?.shortDescription ?: "Unknown"
-                def failureMessage = currentBuild.description ?: "No detailed error message available"
+                def nodeIP = env.NODE_IP ?: "<node-ip>"
                 
                 mail(
                     to: "honguyenminhsang2005@gmail.com",
