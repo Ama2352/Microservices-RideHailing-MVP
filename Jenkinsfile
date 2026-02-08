@@ -318,7 +318,7 @@ DOCKERAUTH
                     
                     echo ""
                     echo "=== Waiting for Dispatch Service rollout ==="
-                    if ! kubectl -n ride-hailing rollout status deployment/dispatch-service --timeout=300s; then
+                    if ! kubectl -n ride-hailing rollout status deployment/dispatch-service --timeout=120s; then
                         echo "⚠️ Dispatch rollout timeout - showing debug info:"
                         kubectl -n ride-hailing get pods -l app=dispatch-service
                         kubectl -n ride-hailing describe pods -l app=dispatch-service | tail -50
@@ -327,7 +327,7 @@ DOCKERAUTH
                     
                     echo ""
                     echo "=== Waiting for Notification Service rollout ==="
-                    if ! kubectl -n ride-hailing rollout status deployment/notification-service --timeout=300s; then
+                    if ! kubectl -n ride-hailing rollout status deployment/notification-service --timeout=120s; then
                         echo "⚠️ Notification rollout timeout - showing debug info:"
                         kubectl -n ride-hailing get pods -l app=notification-service
                         kubectl -n ride-hailing describe pods -l app=notification-service | tail -50
