@@ -351,24 +351,129 @@ DOCKERAUTH
     
     post {
         success {
-            echo "Pipeline completed successfully!"
+            echo "✓ Pipeline completed successfully!"
             echo "Deployed version: ${IMAGE_TAG}"
+            
+            script {
+                def nodeIP = sh(script: "kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type==\"InternalIP\")].address}'", returnStdout: true).trim()
+                
+                mail(
+                    to: "honguyenminhsang2005@gmail.com",
+                    subject: "✓ CI/CD Pipeline Success - Build #${env.BUILD_NUMBER}",
+                    body: """
+===========================================
+✓ CI/CD PIPELINE SUCCESS
+===========================================
 
-            mail(
-                to: "honguyenminhsang2005@gmail.com",
-                subject: "CI/CD Pipeline Success - Build #${env.BUILD_NUMBER}",
-                body: "CI/CD pipeline completed successfully."
-            )
+Build Information:
+------------------
+Build Number:     #${env.BUILD_NUMBER}
+Git Commit:       ${env.GIT_COMMIT}
+Git Branch:       ${env.GIT_BRANCH}
+Image Tag:        ${IMAGE_TAG}
+Build Duration:   ${currentBuild.durationString}
+Build URL:        ${env.BUILD_URL}
+
+Deployed Images:
+------------------
+Dispatch Service:      ${DOCKER_REGISTRY}/dispatch-service:${IMAGE_TAG}
+Notification Service:  ${DOCKER_REGISTRY}/notification-service:${IMAGE_TAG}
+
+Security Validation:
+------------------
+✓ Unit Tests Passed
+✓ SonarQube Quality Gate Passed
+✓ Dependency Scan Passed (govulncheck)
+✓ Container Image Scan Passed (Trivy)
+
+Service Endpoints:
+------------------
+Dispatch:     http://${nodeIP}:30080/dispatch/health
+Notification: http://${nodeIP}:30080/notification/health
+
+Test Commands:
+------------------
+curl http://${nodeIP}:30080/dispatch/health
+curl http://${nodeIP}:30080/notification/health
+
+Deployment successful at: ${new Date()}
+
+Jenkins Job: ${env.BUILD_URL}console
+===========================================
+"""
+                )
+            }
         }
 
         failure {
-            echo "Pipeline failed! Check logs for details."
+            echo "✗ Pipeline failed! Check logs for details."
+            
+            script {
+                def failedStage = currentBuild.rawBuild.getAction(jenkins.model.InterruptedBuildAction.class)?.causes?.first()?.shortDescription ?: "Unknown"
+                def failureMessage = currentBuild.description ?: "No detailed error message available"
+                
+                mail(
+                    to: "honguyenminhsang2005@gmail.com",
+                    subject: "✗ CI/CD Pipeline FAILURE - Build #${env.BUILD_NUMBER}",
+                    body: """
+===========================================
+✗ CI/CD PIPELINE FAILURE
+===========================================
 
-            mail(
-                to: "honguyenminhsang2005@gmail.com",
-                subject: "CI/CD Pipeline Failure - Build #${env.BUILD_NUMBER}",
-                body: "CI/CD pipeline failed."
-            )
+⚠️ IMMEDIATE ACTION REQUIRED ⚠️
+
+Build Information:
+------------------
+Build Number:     #${env.BUILD_NUMBER}
+Git Commit:       ${env.GIT_COMMIT}
+Git Branch:       ${env.GIT_BRANCH}
+Failed Stage:     ${env.STAGE_NAME}
+Build Duration:   ${currentBuild.durationString}
+Build URL:        ${env.BUILD_URL}
+
+Failure Analysis:
+------------------
+The pipeline failed at stage: ${env.STAGE_NAME}
+
+Common Failure Scenarios:
+- Stage 2 (Tests): Unit test failures or code issues
+- Stage 3 (SonarQube): Code quality gate failed
+- Stage 4 (Scan Dependencies): Vulnerable Go dependencies detected
+- Stage 6 (Scan Images): HIGH/CRITICAL vulnerabilities in container images
+- Stage 8 (Deploy): Kubernetes deployment/rollout timeout
+
+Security Alert:
+------------------
+⚠️ If failure occurred at security scanning stages (4 or 6):
+   → Images were NOT pushed to registry
+   → No vulnerable code reached production
+   → Review vulnerability reports in build logs
+
+Action Required:
+------------------
+1. Review full logs: ${env.BUILD_URL}console
+2. Check security scan results if applicable
+3. Fix root cause before triggering new build
+4. Do NOT bypass security gates
+
+Debug Commands:
+------------------
+# View Jenkins pod logs
+kubectl -n jenkins logs -f deployment/jenkins
+
+# Check build agent status
+kubectl -n jenkins get pods
+
+# Review last deployment
+kubectl -n ride-hailing get pods,svc
+
+Failed at: ${new Date()}
+
+Full Console Output: ${env.BUILD_URL}console
+===========================================
+"""
+                )
+            }
         }
     }
 }
