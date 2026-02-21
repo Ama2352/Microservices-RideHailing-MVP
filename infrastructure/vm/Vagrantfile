@@ -1,6 +1,14 @@
 # -*- mode: ruby -*-
 # vi: set ft=ruby :
 
+# =============================================================================
+# VM Resource Allocation (Total: 10 GB)
+# k8s-master    192.168.242.10  2560 MB  2 vCPU  Control plane only
+# k8s-worker-1  192.168.242.11  3072 MB  2 vCPU  SonarQube + Prometheus + Grafana
+# k8s-worker-2  192.168.242.12  2560 MB  2 vCPU  dispatch-service + notification-service + Istio
+# jenkins-vm    192.168.242.13  2048 MB  2 vCPU  Jenkins controller (external, outside K8s)
+# =============================================================================
+
 Vagrant.configure("2") do |config|
   config.vm.box = "bento/ubuntu-22.04"
   config.vm.box_check_update = false
@@ -13,14 +21,15 @@ Vagrant.configure("2") do |config|
   end
 
   # ===========================================================================
-  # MASTER NODE (3GB RAM) - Dùng Ansible để tự động hóa toàn bộ
+  # MASTER NODE (2.5 GB RAM) - Control plane only, no user workloads
+  # etcd + apiserver + scheduler + controller-manager + CoreDNS + Calico
   # ===========================================================================
   config.vm.define "k8s-master" do |master|
     master.vm.hostname = "k8s-master"
     master.vm.network "private_network", ip: "192.168.242.10"
-    
+
     master.vm.provider "vmware_desktop" do |v|
-      v.vmx["memsize"] = "3072"
+      v.vmx["memsize"] = "2560"
       v.vmx["numvcpus"] = "2"
     end
 
@@ -41,20 +50,53 @@ Vagrant.configure("2") do |config|
   end
 
   # ===========================================================================
-  # WORKER NODES (3GB RAM Each) - Dùng Shell Script (Không Ansible)
+  # WORKER NODE 1 (3 GB RAM) - Tooling workloads
+  # SonarQube (1 Gi req / 2 Gi limit) + Prometheus (512 Mi) + Grafana (256 Mi)
   # ===========================================================================
-  (1..2).each do |i|
-    config.vm.define "k8s-worker-#{i}" do |worker|
-      worker.vm.hostname = "k8s-worker-#{i}"
-      worker.vm.network "private_network", ip: "192.168.242.1#{i}"
-      
-      worker.vm.provider "vmware_desktop" do |v|
-        v.vmx["memsize"] = "3072"
-        v.vmx["numvcpus"] = "2"
-      end
+  config.vm.define "k8s-worker-1" do |worker|
+    worker.vm.hostname = "k8s-worker-1"
+    worker.vm.network "private_network", ip: "192.168.242.11"
 
-      # Chỉ cài môi trường nền (Docker, Kubelet). KHÔNG JOIN TỰ ĐỘNG.
-      worker.vm.provision "shell", path: "worker_setup.sh"
+    worker.vm.provider "vmware_desktop" do |v|
+      v.vmx["memsize"] = "3072"
+      v.vmx["numvcpus"] = "2"
     end
+
+    # Chỉ cài môi trường nền (Docker, Kubelet). KHÔNG JOIN TỰ ĐỘNG.
+    worker.vm.provision "shell", path: "worker_setup.sh"
+  end
+
+  # ===========================================================================
+  # WORKER NODE 2 (2.5 GB RAM) - Application workloads
+  # dispatch-service + notification-service + Istio sidecars
+  # ===========================================================================
+  config.vm.define "k8s-worker-2" do |worker|
+    worker.vm.hostname = "k8s-worker-2"
+    worker.vm.network "private_network", ip: "192.168.242.12"
+
+    worker.vm.provider "vmware_desktop" do |v|
+      v.vmx["memsize"] = "2560"
+      v.vmx["numvcpus"] = "2"
+    end
+
+    # Chỉ cài môi trường nền (Docker, Kubelet). KHÔNG JOIN TỰ ĐỘNG.
+    worker.vm.provision "shell", path: "worker_setup.sh"
+  end
+
+  # ===========================================================================
+  # JENKINS VM (2 GB RAM) - External CI/CD controller (outside K8s cluster)
+  # Controller only; agent pods spawn inside K8s and call back on port 50000.
+  # Reaches kube-apiserver at 192.168.242.10:6443 over the private network.
+  # ===========================================================================
+  config.vm.define "jenkins-vm" do |jenkins|
+    jenkins.vm.hostname = "jenkins-vm"
+    jenkins.vm.network "private_network", ip: "192.168.242.13"
+
+    jenkins.vm.provider "vmware_desktop" do |v|
+      v.vmx["memsize"] = "2048"
+      v.vmx["numvcpus"] = "2"
+    end
+
+    jenkins.vm.provision "shell", path: "platform/jenkins/setup-jenkins-vm.sh"
   end
 end

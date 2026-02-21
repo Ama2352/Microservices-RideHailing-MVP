@@ -1,6 +1,9 @@
 # =============================================================================
 # Jenkins Agent Pod Template for CI/CD Pipeline
-# Defines all containers needed for building, testing, scanning, and deploying
+# Defines all containers needed for building, testing, scanning, and deploying.
+# Jenkins controller runs externally on jenkins-vm (192.168.242.13).
+# The jnlp container is defined explicitly so the controller address is
+# self-documenting and not dependent solely on the Jenkins UI cloud config.
 # =============================================================================
 apiVersion: v1
 kind: Pod
@@ -9,8 +12,28 @@ metadata:
     jenkins: agent
 spec:
   serviceAccountName: jenkins
-  
+
   containers:
+  # ===========================================================================
+  # JNLP Container - Agent process that calls back to the Jenkins controller
+  # Must be named "jnlp"; the Kubernetes plugin merges its required connection
+  # vars (secret, agent name) into this definition at pod creation time.
+  # ===========================================================================
+  - name: jnlp
+    image: jenkins/inbound-agent:latest
+    env:
+    - name: JENKINS_URL
+      value: "http://192.168.242.13:8080"
+    - name: JENKINS_TUNNEL
+      value: "192.168.242.13:50000"
+    resources:
+      requests:
+        memory: "128Mi"
+        cpu: "100m"
+      limits:
+        memory: "256Mi"
+        cpu: "200m"
+
   # ===========================================================================
   # Golang Container - For running tests and building Go applications
   # ===========================================================================
