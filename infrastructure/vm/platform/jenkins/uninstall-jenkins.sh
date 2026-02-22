@@ -20,7 +20,6 @@ kubectl delete pods -n jenkins -l app=jenkins --force --grace-period=0 --ignore-
 kubectl patch pvc jenkins-pvc -n jenkins \
   -p '{"metadata":{"finalizers":[]}}' --type=merge 2>/dev/null || true
 
-# PV/PVC deleted by name — 02-storage.yaml was removed after data migration to jenkins-vm
 kubectl delete pvc jenkins-pvc -n jenkins --ignore-not-found=true
 kubectl delete pv jenkins-pv --ignore-not-found=true
 kubectl delete -f "${SCRIPT_DIR}/01-rbac.yaml" --ignore-not-found=true

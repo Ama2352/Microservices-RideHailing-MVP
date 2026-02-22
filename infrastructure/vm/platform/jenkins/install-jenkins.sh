@@ -35,7 +35,7 @@ echo ">>> [2/3] Applying RBAC..."
 kubectl apply -f "${SCRIPT_DIR}/01-rbac.yaml"
 
 echo ">>> [3/3] Applying ServiceAccount token Secret..."
-kubectl apply -f "${SCRIPT_DIR}/05-sa-token.yaml"
+kubectl apply -f "${SCRIPT_DIR}/02-sa-token.yaml"
 
 # Extract credentials for Jenkins UI configuration
 SA_TOKEN=$(kubectl -n jenkins get secret jenkins-sa-token \
