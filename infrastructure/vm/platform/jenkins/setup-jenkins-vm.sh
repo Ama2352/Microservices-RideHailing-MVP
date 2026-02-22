@@ -77,13 +77,17 @@ echo ">>> [4/4] Starting Jenkins container..."
 # Stop and remove any existing container before (re)provisioning
 docker rm -f "${JENKINS_CONTAINER}" 2>/dev/null || true
 
+DOCKER_GID=$(stat -c '%g' /var/run/docker.sock)
+
 docker run -d \
   --name "${JENKINS_CONTAINER}" \
   --restart unless-stopped \
+  --group-add "${DOCKER_GID}" \
   -p 8080:8080 \
   -p 50000:50000 \
   -v "${JENKINS_HOME}:${JENKINS_HOME}" \
   -v /var/run/docker.sock:/var/run/docker.sock \
+  -v /usr/bin/docker:/usr/bin/docker:ro \
   -e "JENKINS_HOME=${JENKINS_HOME}" \
   -e "JAVA_OPTS=${JAVA_OPTS}" \
   -e "JENKINS_OPTS=--httpPort=8080" \

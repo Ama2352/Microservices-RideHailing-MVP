@@ -35,7 +35,7 @@ pipeline {
                         stage('Test Dispatch') {
                             agent {
                                 docker {
-                                    image 'golang:1.21-alpine'
+                                    image 'golang:1.25.7-alpine'
                                     args  '-u root -e HOME=/root -e GOPATH=/root/go'
                                     reuseNode true
                                 }
@@ -54,7 +54,7 @@ pipeline {
                         stage('Test Notification') {
                             agent {
                                 docker {
-                                    image 'golang:1.21-alpine'
+                                    image 'golang:1.25.7-alpine'
                                     args  '-u root -e HOME=/root -e GOPATH=/root/go'
                                     reuseNode true
                                 }
@@ -73,7 +73,7 @@ pipeline {
                         stage('Scan Dependencies') {
                             agent {
                                 docker {
-                                    image 'golang:1.21-alpine'
+                                    image 'golang:1.25.7-alpine'
                                     args  '-u root -e HOME=/root -e GOPATH=/root/go'
                                     reuseNode true
                                 }
@@ -81,8 +81,9 @@ pipeline {
                             steps {
                                 sh '''
                                     go install golang.org/x/vuln/cmd/govulncheck@latest
-                                    cd services/dispatch && govulncheck ./...
-                                    cd ../../services/notification && govulncheck ./...
+                                    GOVULNCHECK=$(go env GOPATH)/bin/govulncheck
+                                    cd services/dispatch && $GOVULNCHECK ./...
+                                    cd ../../services/notification && $GOVULNCHECK ./...
                                 '''
                             }
                         }
@@ -113,7 +114,7 @@ pipeline {
                 stage('Build Images') {
                     agent {
                         docker {
-                            image 'docker:24-cli'
+                            image 'docker:26-cli'
                             args  '-v /var/run/docker.sock:/var/run/docker.sock -u root'
                             reuseNode true
                         }
@@ -156,7 +157,7 @@ pipeline {
                 stage('Push Images') {
                     agent {
                         docker {
-                            image 'docker:24-cli'
+                            image 'docker:26-cli'
                             args  '-v /var/run/docker.sock:/var/run/docker.sock -u root'
                             reuseNode true
                         }
