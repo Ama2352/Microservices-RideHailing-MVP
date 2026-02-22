@@ -1,12 +1,22 @@
 #!/bin/bash
 set -e
 
+[ "$(id -u)" -eq 0 ] || exec sudo "$0" "$@"
+
 # =============================================================================
 # Jenkins VM Setup
 # Installs Docker and runs Jenkins controller as a container.
 # Data volume: /data/jenkins (persisted on this VM)
 # UI port:     8080
-# JNLP port:   50000  (agent callback from K8s cluster)
+#
+# DooD (Docker-outside-of-Docker): CI stages run as sibling containers on
+# this VM. Two requirements:
+#   1. /var/run/docker.sock is mounted so Jenkins can manage siblings.
+#   2. JENKINS_HOME path must be identical on the host and inside the
+#      Jenkins container (/data/jenkins:/data/jenkins). The Docker daemon
+#      runs on the HOST — when Jenkins mounts a workspace into a sibling
+#      container, it passes the in-container path. If host and container
+#      paths differ, the daemon cannot resolve the directory.
 # =============================================================================
 
 JENKINS_IMAGE="jenkins/jenkins:lts-jdk17"
@@ -14,8 +24,8 @@ JENKINS_HOME="/data/jenkins"
 JENKINS_CONTAINER="jenkins"
 JENKINS_URL="http://192.168.242.13:8080"
 
-# JVM heap tuned for 2 GB VM (OS + Docker ~300 MB, leaves ~1.7 GB for JVM)
-JAVA_OPTS="-Xms256m -Xmx768m -Djava.awt.headless=true"
+# JVM heap tuned for 3 GB VM: leaves ~2 GB headroom for Docker agent containers
+JAVA_OPTS="-Xms512m -Xmx1024m -Djava.awt.headless=true"
 
 # -----------------------------------------------------------------------------
 # 1. Install Docker
@@ -38,9 +48,13 @@ apt-get install -y -qq docker-ce docker-ce-cli containerd.io
 systemctl enable docker
 systemctl start docker
 
-# Add vagrant user to docker group
-echo ">>> Adding vagrant user to docker group..."
-usermod -aG docker vagrant
+# Add vagrant user to docker group (idempotent)
+if ! id -nG vagrant | grep -qw docker; then
+    echo ">>> Adding vagrant user to docker group..."
+    usermod -aG docker vagrant
+else
+    echo ">>> vagrant already in docker group, skipping."
+fi
 
 # -----------------------------------------------------------------------------
 # 2. Prepare Jenkins data directory
@@ -68,7 +82,9 @@ docker run -d \
   --restart unless-stopped \
   -p 8080:8080 \
   -p 50000:50000 \
-  -v "${JENKINS_HOME}:/var/jenkins_home" \
+  -v "${JENKINS_HOME}:${JENKINS_HOME}" \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -e "JENKINS_HOME=${JENKINS_HOME}" \
   -e "JAVA_OPTS=${JAVA_OPTS}" \
   -e "JENKINS_OPTS=--httpPort=8080" \
   "${JENKINS_IMAGE}"
@@ -78,15 +94,16 @@ echo "=============================================="
 echo "  Jenkins controller started"
 echo "=============================================="
 echo ""
-echo "  UI:         ${JENKINS_URL}"
-echo "  JNLP port:  50000  (agent callback from K8s)"
-echo "  Data:       ${JENKINS_HOME}"
+echo "  UI:    ${JENKINS_URL}"
+echo "  Data:  ${JENKINS_HOME}"
 echo ""
 echo "  Initial admin password (after ~90s startup):"
-echo "    docker exec jenkins cat /var/jenkins_home/secrets/initialAdminPassword"
+echo "    docker exec jenkins cat ${JENKINS_HOME}/secrets/initialAdminPassword"
 echo ""
-echo "  Kubernetes plugin config:"
-echo "    Jenkins URL:    ${JENKINS_URL}"
-echo "    Jenkins Tunnel: 192.168.242.13:50000"
-echo "    K8s API:        https://192.168.242.10:6443"
+echo "  Required plugins: Docker Pipeline, Git, Pipeline"
+echo ""
+echo "  After Jenkins is up, configure credentials:"
+echo "    docker-registry-credentials  (Username/Password)"
+echo "    sonarqube-token              (Secret text)"
+echo "    k8s-sa-token                 (Secret text — from install-jenkins.sh)"
 echo "=============================================="

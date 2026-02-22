@@ -1,12 +1,13 @@
 # =============================================================================
-# CI Agent Pod Template
-# Used for all CI stages: test, static analysis, build, scan, push.
-# Does NOT include kubectl — deploy stages run on a separate CD pod.
+# [ARCHIVED] CI Agent Pod Template
 #
-# hostNetwork bypasses Calico pod routing. Required because the VM network
-# (192.168.242.x) falls inside the Calico pod CIDR (192.168.0.0/16), so
-# pod-sourced traffic to jenkins-vm is misrouted as pod-to-pod traffic.
-# With hostNetwork the pod uses the node's eth1 interface directly.
+# This pod template is no longer used by the Jenkinsfile.
+# CI stages now run as ephemeral Docker containers on jenkins-vm (DooD).
+# Kept for reference in case CI is moved back into K8s.
+#
+# Original purpose: K8s pod for all CI stages (test, analyse, build, scan,
+# push). Required hostNetwork because the VM subnet (192.168.242.x) falls
+# inside the Calico pod CIDR (192.168.0.0/16), causing misrouted traffic.
 # =============================================================================
 apiVersion: v1
 kind: Pod

@@ -1,13 +1,13 @@
 # =============================================================================
-# CD Agent Pod Template
-# Used exclusively for deploy and verify stages.
-# Only kubectl is needed here — CI tooling (golang, buildkit, trivy) is absent
-# to keep this pod minimal and fast to schedule.
+# [ARCHIVED] CD Agent Pod Template
 #
-# hostNetwork bypasses Calico pod routing. Required because the VM network
-# (192.168.242.x) falls inside the Calico pod CIDR (192.168.0.0/16), so
-# pod-sourced traffic to jenkins-vm is misrouted as pod-to-pod traffic.
-# With hostNetwork the pod uses the node's eth1 interface directly.
+# This pod template is no longer used by the Jenkinsfile.
+# CD stages now run kubectl in a Docker container on jenkins-vm; the cluster
+# is reached via the K8s API using a stored ServiceAccount token.
+# Kept for reference in case CD is moved back into K8s.
+#
+# Original purpose: minimal K8s pod with only kubectl for deploy/verify.
+# Required hostNetwork due to Calico CIDR overlap with VM subnet.
 # =============================================================================
 apiVersion: v1
 kind: Pod

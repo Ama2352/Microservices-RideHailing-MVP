@@ -3,10 +3,10 @@
 
 # =============================================================================
 # VM Resource Allocation (Total: 10 GB)
-# k8s-master    192.168.242.10  2560 MB  2 vCPU  Control plane only
+# k8s-master    192.168.242.10  2048 MB  2 vCPU  Control plane only
 # k8s-worker-1  192.168.242.11  3072 MB  2 vCPU  SonarQube + Prometheus + Grafana
-# k8s-worker-2  192.168.242.12  2560 MB  2 vCPU  dispatch-service + notification-service + Istio
-# jenkins-vm    192.168.242.13  2048 MB  2 vCPU  Jenkins controller (external, outside K8s)
+# k8s-worker-2  192.168.242.12  2048 MB  2 vCPU  dispatch-service + notification-service + Istio
+# jenkins-vm    192.168.242.13  3072 MB  2 vCPU  Jenkins + Docker CI agents (DooD)
 # =============================================================================
 
 Vagrant.configure("2") do |config|
@@ -21,7 +21,7 @@ Vagrant.configure("2") do |config|
   end
 
   # ===========================================================================
-  # MASTER NODE (2.5 GB RAM) - Control plane only, no user workloads
+  # MASTER NODE (2 GB RAM) - Control plane only, no user workloads
   # etcd + apiserver + scheduler + controller-manager + CoreDNS + Calico
   # ===========================================================================
   config.vm.define "k8s-master" do |master|
@@ -29,7 +29,7 @@ Vagrant.configure("2") do |config|
     master.vm.network "private_network", ip: "192.168.242.10"
 
     master.vm.provider "vmware_desktop" do |v|
-      v.vmx["memsize"] = "2560"
+      v.vmx["memsize"] = "2048"
       v.vmx["numvcpus"] = "2"
     end
 
@@ -67,7 +67,7 @@ Vagrant.configure("2") do |config|
   end
 
   # ===========================================================================
-  # WORKER NODE 2 (2.5 GB RAM) - Application workloads
+  # WORKER NODE 2 (2 GB RAM) - Application workloads
   # dispatch-service + notification-service + Istio sidecars
   # ===========================================================================
   config.vm.define "k8s-worker-2" do |worker|
@@ -75,7 +75,7 @@ Vagrant.configure("2") do |config|
     worker.vm.network "private_network", ip: "192.168.242.12"
 
     worker.vm.provider "vmware_desktop" do |v|
-      v.vmx["memsize"] = "2560"
+      v.vmx["memsize"] = "2048"
       v.vmx["numvcpus"] = "2"
     end
 
@@ -84,16 +84,16 @@ Vagrant.configure("2") do |config|
   end
 
   # ===========================================================================
-  # JENKINS VM (2 GB RAM) - External CI/CD controller (outside K8s cluster)
-  # Controller only; agent pods spawn inside K8s and call back on port 50000.
-  # Reaches kube-apiserver at 192.168.242.10:6443 over the private network.
+  # JENKINS VM (3 GB RAM) - Jenkins controller + Docker CI agents
+  # All CI stages run as ephemeral Docker containers on this VM (DooD).
+  # CD stages send kubectl commands to K8s via SA token over the private net.
   # ===========================================================================
   config.vm.define "jenkins-vm" do |jenkins|
     jenkins.vm.hostname = "jenkins-vm"
     jenkins.vm.network "private_network", ip: "192.168.242.13"
 
     jenkins.vm.provider "vmware_desktop" do |v|
-      v.vmx["memsize"] = "2048"
+      v.vmx["memsize"] = "3072"
       v.vmx["numvcpus"] = "2"
     end
 
