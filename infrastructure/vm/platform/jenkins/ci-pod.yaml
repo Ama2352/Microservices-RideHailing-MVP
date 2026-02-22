@@ -1,0 +1,93 @@
+# =============================================================================
+# CI Agent Pod Template
+# Used for all CI stages: test, static analysis, build, scan, push.
+# Does NOT include kubectl — deploy stages run on a separate CD pod.
+#
+# hostNetwork bypasses Calico pod routing. Required because the VM network
+# (192.168.242.x) falls inside the Calico pod CIDR (192.168.0.0/16), so
+# pod-sourced traffic to jenkins-vm is misrouted as pod-to-pod traffic.
+# With hostNetwork the pod uses the node's eth1 interface directly.
+# =============================================================================
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    jenkins: agent
+spec:
+  serviceAccountName: jenkins
+  hostNetwork: true
+  dnsPolicy: ClusterFirstWithHostNet
+
+  containers:
+  # JNLP - agent process that calls back to the Jenkins controller.
+  # Must be named "jnlp"; the Kubernetes plugin injects connection vars at pod
+  # creation time.
+  - name: jnlp
+    image: jenkins/inbound-agent:latest
+    env:
+    - name: JENKINS_URL
+      value: "http://192.168.242.13:8080"
+    resources:
+      requests:
+        memory: "128Mi"
+        cpu: "100m"
+      limits:
+        memory: "256Mi"
+        cpu: "200m"
+
+  # Golang - unit tests, go vet, dependency vulnerability scanning (govulncheck)
+  - name: golang
+    image: golang:1.25.7-alpine
+    command: [cat]
+    tty: true
+    resources:
+      requests:
+        memory: "512Mi"
+        cpu: "500m"
+      limits:
+        memory: "2Gi"
+        cpu: "1000m"
+
+  # BuildKit - daemonless image builds and push to registry
+  - name: buildkit
+    image: moby/buildkit:v0.13.2
+    securityContext:
+      privileged: true
+    resources:
+      requests:
+        memory: "512Mi"
+        cpu: "200m"
+      limits:
+        memory: "2Gi"
+        cpu: "1000m"
+    readinessProbe:
+      exec:
+        command: [buildctl, debug, workers]
+      initialDelaySeconds: 5
+      periodSeconds: 5
+
+  # SonarQube Scanner - static code analysis (SAST)
+  - name: sonar-scanner
+    image: sonarsource/sonar-scanner-cli:11.3
+    command: [cat]
+    tty: true
+    resources:
+      requests:
+        memory: "256Mi"
+        cpu: "100m"
+      limits:
+        memory: "512Mi"
+        cpu: "500m"
+
+  # Trivy - container image vulnerability scanning
+  - name: trivy
+    image: aquasec/trivy:0.48.3
+    command: [cat]
+    tty: true
+    resources:
+      requests:
+        memory: "128Mi"
+        cpu: "100m"
+      limits:
+        memory: "256Mi"
+        cpu: "200m"

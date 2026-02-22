@@ -1,0 +1,50 @@
+# =============================================================================
+# CD Agent Pod Template
+# Used exclusively for deploy and verify stages.
+# Only kubectl is needed here — CI tooling (golang, buildkit, trivy) is absent
+# to keep this pod minimal and fast to schedule.
+#
+# hostNetwork bypasses Calico pod routing. Required because the VM network
+# (192.168.242.x) falls inside the Calico pod CIDR (192.168.0.0/16), so
+# pod-sourced traffic to jenkins-vm is misrouted as pod-to-pod traffic.
+# With hostNetwork the pod uses the node's eth1 interface directly.
+# =============================================================================
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    jenkins: agent
+spec:
+  serviceAccountName: jenkins
+  hostNetwork: true
+  dnsPolicy: ClusterFirstWithHostNet
+
+  containers:
+  # JNLP - agent process that calls back to the Jenkins controller.
+  # Must be named "jnlp"; the Kubernetes plugin injects connection vars at pod
+  # creation time.
+  - name: jnlp
+    image: jenkins/inbound-agent:latest
+    env:
+    - name: JENKINS_URL
+      value: "http://192.168.242.13:8080"
+    resources:
+      requests:
+        memory: "128Mi"
+        cpu: "100m"
+      limits:
+        memory: "256Mi"
+        cpu: "200m"
+
+  # Kubectl - apply manifests and verify rollout status
+  - name: kubectl
+    image: alpine/k8s:1.29.0
+    command: [cat]
+    tty: true
+    resources:
+      requests:
+        memory: "64Mi"
+        cpu: "50m"
+      limits:
+        memory: "128Mi"
+        cpu: "100m"

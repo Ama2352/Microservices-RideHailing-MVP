@@ -1,27 +1,29 @@
 // =============================================================================
 // CI/CD Pipeline for Ride-Hailing Microservices
-// Uses BuildKit for daemonless container builds (works with containerd)
+//
+// Architecture: two separate K8s agent pods
+//   CI pod (ci-pod.yaml)  — golang, buildkit, sonar-scanner, trivy
+//   CD pod (cd-pod.yaml)  — kubectl only
+//
+// CI stages share one pod instance (no stash needed between them).
+// CD stages spin up a minimal kubectl-only pod after CI succeeds.
+// This ensures CD tooling is never scheduled for builds that fail CI.
 // =============================================================================
 
 pipeline {
-    agent {
-        kubernetes {
-            // Load agent pod template from external file for better maintainability
-            yamlFile 'infrastructure/vm/platform/jenkins/agent-pod.yaml'
-        }
-    }
-    
+    // No top-level agent. Each phase declares its own pod so only the
+    // containers actually needed for that phase are scheduled.
+    agent none
+
     environment {
-        // =================================================================
-        // Configuration (non-secrets)
-        // Set DOCKER_REGISTRY in Jenkins: Manage Jenkins → System → 
+        // Set DOCKER_REGISTRY in Jenkins: Manage Jenkins → System →
         // Global properties → Environment variables
         // Example: docker.io/yourusername
-        // =================================================================
         DOCKER_REGISTRY = "${env.DOCKER_REGISTRY ?: 'docker.io/your-dockerhub-username'}"
-        
-        // Build Configuration
-        IMAGE_TAG = "${env.BUILD_NUMBER}-${env.GIT_COMMIT?.take(7) ?: 'latest'}"
+
+        // IMAGE_TAG is computed in the Checkout stage after GIT_COMMIT is
+        // populated by checkout scm. Defined here so it is visible to post{}.
+        IMAGE_TAG = ''
     }
     
     options {
@@ -29,228 +31,240 @@ pipeline {
         disableConcurrentBuilds()
         buildDiscarder(logRotator(numToKeepStr: '10'))
     }
-    
+
     stages {
         // =====================================================================
-        // Stage 1: Checkout & Prepare
+        // CI Phase
+        // One pod for all CI stages: test → analyse → build → scan → push.
+        // The pod stays alive across all nested stages so the workspace
+        // (including built .tar files) is shared without stash/unstash.
         // =====================================================================
-        stage('Checkout') {
-            steps {
-                checkout scm
-                script {
-                    echo "Building commit: ${env.GIT_COMMIT}"
-                    echo "Image tag: ${IMAGE_TAG}"
-                    echo "Docker registry: ${DOCKER_REGISTRY}"
+        stage('CI') {
+            agent {
+                kubernetes {
+                    yamlFile 'infrastructure/vm/platform/jenkins/ci-pod.yaml'
                 }
             }
-        }
-        
-        // =====================================================================
-        // Stage 2: Automated Tests (Parallel)
-        // Executes unit tests and coverage checks across services in parallel
-        // =====================================================================
-        stage('Automated Tests') {
-            parallel {
-                stage('Test Dispatch') {
+
+            stages {
+                // =============================================================
+                // Stage 1: Checkout & Prepare
+                // IMAGE_TAG is set here (not in environment{}) because
+                // GIT_COMMIT is only populated after checkout scm runs.
+                // =============================================================
+                stage('Checkout') {
                     steps {
-                        container('golang') {
-                            dir('services/dispatch') {
+                        checkout scm
+                        script {
+                            env.IMAGE_TAG = "${env.BUILD_NUMBER}-${env.GIT_COMMIT?.take(7) ?: 'latest'}"
+                            echo "Building commit: ${env.GIT_COMMIT}"
+                            echo "Image tag:       ${env.IMAGE_TAG}"
+                            echo "Registry:        ${env.DOCKER_REGISTRY}"
+                        }
+                    }
+                }
+
+                // =============================================================
+                // Stage 2: Automated Tests (Parallel)
+                // =============================================================
+                stage('Automated Tests') {
+                    parallel {
+                        stage('Test Dispatch') {
+                            steps {
+                                container('golang') {
+                                    dir('services/dispatch') {
+                                        sh '''
+                                            go mod download
+                                            go vet ./...
+                                            go test -v -coverprofile=coverage.out ./... || echo "No tests yet"
+                                        '''
+                                    }
+                                }
+                            }
+                        }
+
+                        stage('Test Notification') {
+                            steps {
+                                container('golang') {
+                                    dir('services/notification') {
+                                        sh '''
+                                            go mod download
+                                            go vet ./...
+                                            go test -v -coverprofile=coverage.out ./... || echo "No tests yet"
+                                        '''
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // =============================================================
+                // Stage 3: SonarQube Analysis
+                // Runs after tests so coverage reports are available.
+                // =============================================================
+                stage('SonarQube Analysis') {
+                    steps {
+                        container('sonar-scanner') {
+                            withCredentials([string(credentialsId: 'sonarqube-token', variable: 'SONAR_TOKEN')]) {
                                 sh '''
-                                    go mod download
-                                    go vet ./...
-                                    go test -v -coverprofile=coverage.out ./... || echo "No tests yet"
+                                SONAR_HOST="http://sonarqube.sonarqube.svc.cluster.local:9000"
+
+                                echo "=== Analyzing Dispatch Service ==="
+                                cd services/dispatch
+                                sonar-scanner \
+                                    -Dsonar.host.url=${SONAR_HOST} \
+                                    -Dsonar.token=${SONAR_TOKEN}
+                                cd ../..
+
+                                echo ""
+                                echo "=== Analyzing Notification Service ==="
+                                cd services/notification
+                                sonar-scanner \
+                                    -Dsonar.host.url=${SONAR_HOST} \
+                                    -Dsonar.token=${SONAR_TOKEN}
+
+                                echo ""
+                                echo "All services passed SonarQube quality gate"
                                 '''
                             }
                         }
                     }
                 }
-                
-                stage('Test Notification') {
+
+                // =============================================================
+                // Stage 4: Scan Dependencies
+                // govulncheck checks go.mod against the Go Vulnerability Database.
+                // =============================================================
+                stage('Scan Dependencies') {
                     steps {
                         container('golang') {
-                            dir('services/notification') {
-                                sh '''
-                                    go mod download
-                                    go vet ./...
-                                    go test -v -coverprofile=coverage.out ./... || echo "No tests yet"
-                                '''
-                            }
+                            sh '''
+                            echo "=== Installing govulncheck ==="
+                            go install golang.org/x/vuln/cmd/govulncheck@latest
+
+                            echo ""
+                            echo "=== Scanning Dispatch Service ==="
+                            cd services/dispatch
+                            govulncheck ./...
+                            cd ../..
+
+                            echo ""
+                            echo "=== Scanning Notification Service ==="
+                            cd services/notification
+                            govulncheck ./...
+
+                            echo ""
+                            echo "All dependencies passed vulnerability scan"
+                            '''
                         }
                     }
                 }
-            }
-        }
-        
-        // =====================================================================
-        // Stage 3: SonarQube Analysis
-        // Static code analysis: bugs, code smells, duplication, maintainability
-        // Runs after tests so coverage reports are available
-        // Requires: SonarQube server + Jenkins SonarQube plugin configured
-        // =====================================================================
-        stage('SonarQube Analysis') {
-            steps {
-                container('sonar-scanner') {
-                    withCredentials([string(credentialsId: 'sonarqube-token', variable: 'SONAR_TOKEN')]) {
-                        sh '''
-                        SONAR_HOST="http://sonarqube.sonarqube.svc.cluster.local:9000"
-                        
-                        echo "=== Analyzing Dispatch Service ==="
-                        cd services/dispatch
-                        sonar-scanner \
-                            -Dsonar.host.url=${SONAR_HOST} \
-                            -Dsonar.token=${SONAR_TOKEN}
-                        cd ../..
-                        
-                        echo ""
-                        echo "=== Analyzing Notification Service ==="
-                        cd services/notification
-                        sonar-scanner \
-                            -Dsonar.host.url=${SONAR_HOST} \
-                            -Dsonar.token=${SONAR_TOKEN}
-                        
-                        echo ""
-                        echo "All services passed SonarQube quality gate"
-                        '''
+
+                // =============================================================
+                // Stage 5: Build Images (local tar only)
+                // Images are written to .tar files for Trivy to scan.
+                // They are NOT pushed yet — push only happens after scan passes.
+                // =============================================================
+                stage('Build Images') {
+                    steps {
+                        container('buildkit') {
+                            sh '''
+                            set -e
+
+                            echo "=== Building Dispatch Service ==="
+                            buildctl build \
+                                --frontend dockerfile.v0 \
+                                --local context=./services/dispatch \
+                                --local dockerfile=./services/dispatch \
+                                --output type=docker,name=dispatch-service:scan,dest=dispatch-service.tar
+
+                            echo "=== Building Notification Service ==="
+                            buildctl build \
+                                --frontend dockerfile.v0 \
+                                --local context=./services/notification \
+                                --local dockerfile=./services/notification \
+                                --output type=docker,name=notification-service:scan,dest=notification-service.tar
+
+                            echo "Images built (not pushed yet)"
+                            ls -lh *.tar
+                            '''
+                        }
                     }
                 }
-            }
-        }
-        
-        // =====================================================================
-        // Stage 4: Scan Dependencies
-        // Uses govulncheck - Go's official vulnerability scanner (golang.org/x/vuln)
-        // Checks go.mod against the Go Vulnerability Database
-        // Fast (~10s), no heavy database download needed
-        // =====================================================================
-        stage('Scan Dependencies') {
-            steps {
-                container('golang') {
-                    sh '''
-                    echo "=== Installing govulncheck ==="
-                    go install golang.org/x/vuln/cmd/govulncheck@latest
-                    
-                    echo ""
-                    echo "=== Scanning Dispatch Service ==="
-                    cd services/dispatch
-                    govulncheck ./...
-                    cd ../.. 
-                    
-                    echo ""
-                    echo "=== Scanning Notification Service ==="
-                    cd services/notification
-                    govulncheck ./...
-                    
-                    echo ""
-                    echo "✓ All dependencies passed vulnerability scan"
-                    '''
+
+                // =============================================================
+                // Stage 6: Scan Container Images
+                // SECURITY GATE — pipeline aborts here if HIGH/CRITICAL found.
+                // .tar files from the previous stage are still on this pod's
+                // workspace; no stash/unstash needed.
+                // =============================================================
+                stage('Scan Images') {
+                    steps {
+                        container('trivy') {
+                            sh '''
+                            set -e
+                            SCAN_FAILED=0
+
+                            echo "=== Scanning Dispatch Service Image ==="
+                            if ! trivy image \
+                                --input dispatch-service.tar \
+                                --severity HIGH,CRITICAL \
+                                --exit-code 1 \
+                                --no-progress \
+                                --format table; then
+                                echo "SECURITY ALERT: Dispatch service has HIGH/CRITICAL vulnerabilities!"
+                                SCAN_FAILED=1
+                            else
+                                echo "Dispatch service: No HIGH/CRITICAL vulnerabilities found"
+                            fi
+
+                            echo ""
+                            echo "=== Scanning Notification Service Image ==="
+                            if ! trivy image \
+                                --input notification-service.tar \
+                                --severity HIGH,CRITICAL \
+                                --exit-code 1 \
+                                --no-progress \
+                                --format table; then
+                                echo "SECURITY ALERT: Notification service has HIGH/CRITICAL vulnerabilities!"
+                                SCAN_FAILED=1
+                            else
+                                echo "Notification service: No HIGH/CRITICAL vulnerabilities found"
+                            fi
+
+                            if [ $SCAN_FAILED -eq 1 ]; then
+                                echo ""
+                                echo "Security scan failed: images will NOT be pushed."
+                                exit 1
+                            fi
+
+                            echo ""
+                            echo "All images passed security scan - approved for push"
+                            '''
+                        }
+                    }
                 }
-            }
-        }
-        
-        // =====================================================================
-        // Stage 5: Build Images (Local Only)
-        // BuildKit builds images to Docker tar format for Trivy scanning
-        // Images are NOT pushed yet - must pass security scan first
-        // =====================================================================
-        stage('Build Images') {
-            steps {
-                container('buildkit') {
-                    sh '''
-                    set -e
-                    
-                    echo "=== Building Dispatch Service ==="
-                    buildctl build \
-                        --frontend dockerfile.v0 \
-                        --local context=./services/dispatch \
-                        --local dockerfile=./services/dispatch \
-                        --output type=docker,name=dispatch-service:scan,dest=dispatch-service.tar
-                    
-                    echo "=== Building Notification Service ==="
-                    buildctl build \
-                        --frontend dockerfile.v0 \
-                        --local context=./services/notification \
-                        --local dockerfile=./services/notification \
-                        --output type=docker,name=notification-service:scan,dest=notification-service.tar
-                    
-                    echo "✓ Images built successfully (not pushed yet)"
-                    ls -lh *.tar
-                    '''
-                }
-            }
-        }
-        
-        // =====================================================================
-        // Stage 6: Scan Container Images
-        // Trivy scans LOCAL image tars for OS and application vulnerabilities
-        // SECURITY GATE: Only clean images proceed to push stage
-        // =====================================================================
-        stage('Scan Images') {
-            steps {
-                container('trivy') {
-                    sh '''
-                    set -e
-                    SCAN_FAILED=0
-                    
-                    echo "=== Scanning Dispatch Service Image ==="
-                    if ! trivy image \
-                        --input dispatch-service.tar \
-                        --severity HIGH,CRITICAL \
-                        --exit-code 1 \
-                        --no-progress \
-                        --format table; then
-                        echo "⚠️ SECURITY ALERT: Dispatch service has HIGH/CRITICAL vulnerabilities!"
-                        SCAN_FAILED=1
-                    else
-                        echo "✓ Dispatch service: No HIGH/CRITICAL vulnerabilities found"
-                    fi
-                    
-                    echo ""
-                    echo "=== Scanning Notification Service Image ==="
-                    if ! trivy image \
-                        --input notification-service.tar \
-                        --severity HIGH,CRITICAL \
-                        --exit-code 1 \
-                        --no-progress \
-                        --format table; then
-                        echo "⚠️ SECURITY ALERT: Notification service has HIGH/CRITICAL vulnerabilities!"
-                        SCAN_FAILED=1
-                    else
-                        echo "✓ Notification service: No HIGH/CRITICAL vulnerabilities found"
-                    fi
-                    
-                    if [ $SCAN_FAILED -eq 1 ]; then
-                        echo ""
-                        echo "❌ Security scan failed: HIGH/CRITICAL vulnerabilities detected."
-                        echo "Images will NOT be pushed to registry."
-                        exit 1
-                    fi
-                    
-                    echo ""
-                    echo "✓ All images passed security scan - approved for push"
-                    '''
-                }
-            }
-        }
-        
-        // =====================================================================
-        // Stage 7: Push Validated Images
-        // Only reached if security scans pass
-        // Pushes clean images to registry with proper tags and caching
-        // =====================================================================
-        stage('Push Images') {
-            steps {
-                container('buildkit') {
-                    withCredentials([
-                        usernamePassword(credentialsId: 'docker-registry-credentials', 
-                            usernameVariable: 'DOCKER_USER', 
-                            passwordVariable: 'DOCKER_PASS')
-                    ]) {
-                        sh '''
-                        set -e
-                        
-                        # Configure registry authentication
-                        mkdir -p /root/.docker
-                        cat > /root/.docker/config.json <<DOCKERAUTH
+
+                // =============================================================
+                // Stage 7: Push Validated Images
+                // Only reached if security scan passed.
+                // =============================================================
+                stage('Push Images') {
+                    steps {
+                        container('buildkit') {
+                            withCredentials([
+                                usernamePassword(
+                                    credentialsId: 'docker-registry-credentials',
+                                    usernameVariable: 'DOCKER_USER',
+                                    passwordVariable: 'DOCKER_PASS'
+                                )
+                            ]) {
+                                sh '''
+                                set -e
+
+                                mkdir -p /root/.docker
+                                cat > /root/.docker/config.json <<DOCKERAUTH
 {
   "auths": {
     "https://index.docker.io/v1/": {
@@ -260,113 +274,124 @@ pipeline {
   }
 }
 DOCKERAUTH
-                        
-                        echo "=== Pushing Dispatch Service ==="
-                        buildctl build \
-                            --frontend dockerfile.v0 \
-                            --local context=./services/dispatch \
-                            --local dockerfile=./services/dispatch \
-                            --output type=image,name=${DOCKER_REGISTRY}/dispatch-service:${IMAGE_TAG},push=true \
-                            --output type=image,name=${DOCKER_REGISTRY}/dispatch-service:latest,push=true \
-                            --export-cache type=registry,ref=${DOCKER_REGISTRY}/dispatch-service:buildcache,mode=max \
-                            --import-cache type=registry,ref=${DOCKER_REGISTRY}/dispatch-service:buildcache
-                        
-                        echo "=== Pushing Notification Service ==="
-                        buildctl build \
-                            --frontend dockerfile.v0 \
-                            --local context=./services/notification \
-                            --local dockerfile=./services/notification \
-                            --output type=image,name=${DOCKER_REGISTRY}/notification-service:${IMAGE_TAG},push=true \
-                            --output type=image,name=${DOCKER_REGISTRY}/notification-service:latest,push=true \
-                            --export-cache type=registry,ref=${DOCKER_REGISTRY}/notification-service:buildcache,mode=max \
-                            --import-cache type=registry,ref=${DOCKER_REGISTRY}/notification-service:buildcache
-                        
-                        echo "✓ All validated images pushed to registry"
-                        '''
+
+                                echo "=== Pushing Dispatch Service ==="
+                                buildctl build \
+                                    --frontend dockerfile.v0 \
+                                    --local context=./services/dispatch \
+                                    --local dockerfile=./services/dispatch \
+                                    --output type=image,name=${DOCKER_REGISTRY}/dispatch-service:${IMAGE_TAG},push=true \
+                                    --output type=image,name=${DOCKER_REGISTRY}/dispatch-service:latest,push=true \
+                                    --export-cache type=registry,ref=${DOCKER_REGISTRY}/dispatch-service:buildcache,mode=max \
+                                    --import-cache type=registry,ref=${DOCKER_REGISTRY}/dispatch-service:buildcache
+
+                                echo "=== Pushing Notification Service ==="
+                                buildctl build \
+                                    --frontend dockerfile.v0 \
+                                    --local context=./services/notification \
+                                    --local dockerfile=./services/notification \
+                                    --output type=image,name=${DOCKER_REGISTRY}/notification-service:${IMAGE_TAG},push=true \
+                                    --output type=image,name=${DOCKER_REGISTRY}/notification-service:latest,push=true \
+                                    --export-cache type=registry,ref=${DOCKER_REGISTRY}/notification-service:buildcache,mode=max \
+                                    --import-cache type=registry,ref=${DOCKER_REGISTRY}/notification-service:buildcache
+
+                                echo "All validated images pushed to registry"
+                                '''
+                            }
+                        }
                     }
                 }
             }
         }
-        
+
         // =====================================================================
-        // Stage 8: Deploy to Kubernetes
-        // Only reached if all security scans pass and images are pushed
-        // Uses envsubst for reliable variable substitution
+        // CD Phase
+        // Minimal kubectl-only pod. Only scheduled after all CI stages pass.
+        // Could not have been created on the CI pod because the source code
+        // checked out there is not present here — `kubectl apply` reads from
+        // the repo checkout on this pod's own workspace.
         // =====================================================================
-        stage('Deploy to Kubernetes') {
-            steps {
-                container('kubectl') {
-                    sh '''
-                    set -e
-                    
-                    # Deploy Kubernetes resources with envsubst for reliable substitution
-                    export DOCKER_REGISTRY="${DOCKER_REGISTRY}"
-                    export IMAGE_TAG="${IMAGE_TAG}"
-                    
-                    echo "=== Deploying Dispatch Service ==="
-                    cat services/dispatch/k8s.yaml | envsubst | kubectl apply -f -
-                    kubectl apply -f services/dispatch/istio.yaml
-                    
-                    echo ""
-                    echo "=== Deploying Notification Service ==="
-                    cat services/notification/k8s.yaml | envsubst | kubectl apply -f -
-                    kubectl apply -f services/notification/istio.yaml
-                    
-                    echo ""
-                    echo "=== Checking pod status before rollout ==="
-                    kubectl -n ride-hailing get pods
-                    
-                    echo ""
-                    echo "=== Waiting for Dispatch Service rollout ==="
-                    if ! kubectl -n ride-hailing rollout status deployment/dispatch-service --timeout=300s; then
-                        echo "⚠️ Dispatch rollout timeout - showing debug info:"
-                        kubectl -n ride-hailing get pods -l app=dispatch-service
-                        kubectl -n ride-hailing describe pods -l app=dispatch-service | tail -50
-                        exit 1
-                    fi
-                    
-                    echo ""
-                    echo "=== Waiting for Notification Service rollout ==="
-                    if ! kubectl -n ride-hailing rollout status deployment/notification-service --timeout=300s; then
-                        echo "⚠️ Notification rollout timeout - showing debug info:"
-                        kubectl -n ride-hailing get pods -l app=notification-service
-                        kubectl -n ride-hailing describe pods -l app=notification-service | tail -50
-                        exit 1
-                    fi
-                    
-                    echo ""
-                    echo "✓ All deployments rolled out successfully"
-                    '''
+        stage('CD') {
+            agent {
+                kubernetes {
+                    yamlFile 'infrastructure/vm/platform/jenkins/cd-pod.yaml'
                 }
             }
-        }
-        
-        // =====================================================================
-        // Stage 9: Verify Deployment
-        // =====================================================================
-        stage('Verify Deployment') {
-            steps {
-                container('kubectl') {
-                    sh '''
-                    echo "=== Deployment Status ==="
-                    kubectl -n ride-hailing get pods -o wide
-                    
-                    echo "=== Service Endpoints ==="
-                    kubectl -n ride-hailing get svc
-                    
-                    echo "=== Istio Configuration ==="
-                    kubectl -n ride-hailing get gateway,virtualservice,destinationrule
-                    
-                    echo "=== Istio Sidecar Check ==="
-                    kubectl -n ride-hailing get pods -o jsonpath='{range .items[*]}{.metadata.name}{": "}{.spec.containers[*].name}{"\\n"}{end}'
-                    
-                    echo "=== Ingress Gateway ==="
-                    kubectl -n istio-system get svc istio-ingressgateway
-                    
-                    echo ""
-                    echo "✓ Deployment verified successfully"
-                    echo "Access services via NodePort 30080 on any cluster node"
-                    '''
+
+            stages {
+                // =============================================================
+                // Stage 8: Deploy to Kubernetes
+                // =============================================================
+                stage('Deploy to Kubernetes') {
+                    steps {
+                        container('kubectl') {
+                            sh '''
+                            set -e
+
+                            export DOCKER_REGISTRY="${DOCKER_REGISTRY}"
+                            export IMAGE_TAG="${IMAGE_TAG}"
+
+                            echo "=== Deploying Dispatch Service ==="
+                            cat services/dispatch/k8s.yaml | envsubst | kubectl apply -f -
+                            kubectl apply -f services/dispatch/istio.yaml
+
+                            echo ""
+                            echo "=== Deploying Notification Service ==="
+                            cat services/notification/k8s.yaml | envsubst | kubectl apply -f -
+                            kubectl apply -f services/notification/istio.yaml
+
+                            echo ""
+                            echo "=== Waiting for Dispatch Service rollout ==="
+                            if ! kubectl -n ride-hailing rollout status deployment/dispatch-service --timeout=300s; then
+                                echo "Dispatch rollout timeout - debug info:"
+                                kubectl -n ride-hailing get pods -l app=dispatch-service
+                                kubectl -n ride-hailing describe pods -l app=dispatch-service | tail -50
+                                exit 1
+                            fi
+
+                            echo ""
+                            echo "=== Waiting for Notification Service rollout ==="
+                            if ! kubectl -n ride-hailing rollout status deployment/notification-service --timeout=300s; then
+                                echo "Notification rollout timeout - debug info:"
+                                kubectl -n ride-hailing get pods -l app=notification-service
+                                kubectl -n ride-hailing describe pods -l app=notification-service | tail -50
+                                exit 1
+                            fi
+
+                            echo ""
+                            echo "All deployments rolled out successfully"
+                            '''
+                        }
+                    }
+                }
+
+                // =============================================================
+                // Stage 9: Verify Deployment
+                // =============================================================
+                stage('Verify Deployment') {
+                    steps {
+                        container('kubectl') {
+                            sh '''
+                            echo "=== Deployment Status ==="
+                            kubectl -n ride-hailing get pods -o wide
+
+                            echo "=== Service Endpoints ==="
+                            kubectl -n ride-hailing get svc
+
+                            echo "=== Istio Configuration ==="
+                            kubectl -n ride-hailing get gateway,virtualservice,destinationrule
+
+                            echo "=== Istio Sidecar Check ==="
+                            kubectl -n ride-hailing get pods -o jsonpath='{range .items[*]}{.metadata.name}{": "}{.spec.containers[*].name}{"\n"}{end}'
+
+                            echo "=== Ingress Gateway ==="
+                            kubectl -n istio-system get svc istio-ingressgateway
+
+                            echo ""
+                            echo "Deployment verified. Access services via NodePort 30080 on any cluster node."
+                            '''
+                        }
+                    }
                 }
             }
         }
@@ -420,9 +445,9 @@ Deployment successful at: ${new Date()}
 
 View Build:
 ------------------
-Blue Ocean:    http://jenkins.local:30808/blue/organizations/jenkins/ride-hailing-services/detail/ride-hailing-services/${env.BUILD_NUMBER}/pipeline
-Console:       http://jenkins.local:30808/job/ride-hailing-services/${env.BUILD_NUMBER}/console
-Classic View:  http://jenkins.local:30808/job/ride-hailing-services/${env.BUILD_NUMBER}/
+Blue Ocean:    http://192.168.242.13:8080/blue/organizations/jenkins/ride-hailing-services/detail/ride-hailing-services/${env.BUILD_NUMBER}/pipeline
+Console:       http://192.168.242.13:8080/job/ride-hailing-services/${env.BUILD_NUMBER}/console
+Classic View:  http://192.168.242.13:8080/job/ride-hailing-services/${env.BUILD_NUMBER}/
 ===========================================
 """
             )
@@ -476,11 +501,11 @@ Action Required:
 
 Debug Commands:
 ------------------
-# View Jenkins pod logs
-kubectl -n jenkins logs -f deployment/jenkins
-
-# Check build agent status
+# Check build agent pods
 kubectl -n jenkins get pods
+
+# View Jenkins controller logs (runs on jenkins-vm as Docker container)
+ssh vagrant@192.168.242.13 'docker logs jenkins --tail 100'
 
 # Review last deployment
 kubectl -n ride-hailing get pods,svc
@@ -489,9 +514,9 @@ Failed at: ${new Date()}
 
 View Build (Blue Ocean shows failed stage clearly):
 ------------------
-Blue Ocean:    http://jenkins.local:30808/blue/organizations/jenkins/ride-hailing-services/detail/ride-hailing-services/${env.BUILD_NUMBER}/pipeline
-Console:       http://jenkins.local:30808/job/ride-hailing-services/${env.BUILD_NUMBER}/console
-Classic View:  http://jenkins.local:30808/job/ride-hailing-services/${env.BUILD_NUMBER}/
+Blue Ocean:    http://192.168.242.13:8080/blue/organizations/jenkins/ride-hailing-services/detail/ride-hailing-services/${env.BUILD_NUMBER}/pipeline
+Console:       http://192.168.242.13:8080/job/ride-hailing-services/${env.BUILD_NUMBER}/console
+Classic View:  http://192.168.242.13:8080/job/ride-hailing-services/${env.BUILD_NUMBER}/
 ===========================================
 """
             )
