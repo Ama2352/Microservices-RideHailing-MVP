@@ -20,10 +20,6 @@ pipeline {
         // Global properties → Environment variables
         // Example: docker.io/yourusername
         DOCKER_REGISTRY = "${env.DOCKER_REGISTRY ?: 'docker.io/your-dockerhub-username'}"
-
-        // IMAGE_TAG is computed in the Checkout stage after GIT_COMMIT is
-        // populated by checkout scm. Defined here so it is visible to post{}.
-        IMAGE_TAG = ''
     }
     
     options {
@@ -382,7 +378,8 @@ DOCKERAUTH
                             kubectl -n ride-hailing get gateway,virtualservice,destinationrule
 
                             echo "=== Istio Sidecar Check ==="
-                            kubectl -n ride-hailing get pods -o jsonpath='{range .items[*]}{.metadata.name}{": "}{.spec.containers[*].name}{"\n"}{end}'
+                            kubectl -n ride-hailing get pods \
+                                -o custom-columns='NAME:.metadata.name,CONTAINERS:.spec.containers[*].name'
 
                             echo "=== Ingress Gateway ==="
                             kubectl -n istio-system get svc istio-ingressgateway
@@ -399,8 +396,8 @@ DOCKERAUTH
     
     post {
         success {
-            echo "✓ Pipeline completed successfully!"
-            echo "Deployed version: ${IMAGE_TAG}"
+            echo "Pipeline completed successfully!"
+            echo "Deployed version: ${env.IMAGE_TAG}"
             
             mail(
                 to: "honguyenminhsang2005@gmail.com",
@@ -415,13 +412,13 @@ Build Information:
 Build Number:     #${env.BUILD_NUMBER}
 Git Commit:       ${env.GIT_COMMIT}
 Git Branch:       ${env.GIT_BRANCH ?: 'N/A'}
-Image Tag:        ${IMAGE_TAG}
+Image Tag:        ${env.IMAGE_TAG}
 Build Duration:   ${currentBuild.durationString}
 
 Deployed Images:
 ------------------
-${DOCKER_REGISTRY}/dispatch-service:${IMAGE_TAG}
-${DOCKER_REGISTRY}/notification-service:${IMAGE_TAG}
+${DOCKER_REGISTRY}/dispatch-service:${env.IMAGE_TAG}
+${DOCKER_REGISTRY}/notification-service:${env.IMAGE_TAG}
 
 Security Validation:
 ------------------
