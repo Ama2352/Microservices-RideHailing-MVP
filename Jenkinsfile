@@ -229,6 +229,8 @@ pipeline {
         stage('CD') {
             agent {
                 kubernetes {
+                    cloud 'Kubernetes'  
+                    namespace 'jenkins'     
                     yamlFile 'infrastructure/vm/platform/jenkins/pod-templates/cd-pod.yaml'
                     defaultContainer 'kubectl'
                 }
