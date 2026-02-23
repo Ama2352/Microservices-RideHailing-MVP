@@ -25,7 +25,7 @@ JENKINS_CONTAINER="jenkins"
 JENKINS_URL="http://192.168.242.13:8080"
 
 # JVM heap tuned for 3 GB VM: leaves ~2 GB headroom for Docker agent containers
-JAVA_OPTS="-Xms512m -Xmx1024m -Djava.awt.headless=true"
+JAVA_OPTS="-Xms512m -Xmx1024m -Djava.awt.headless=true -Dorg.jenkinsci.plugins.durabletask.BourneShellScript.HEARTBEAT_CHECK_INTERVAL=86400"
 
 # -----------------------------------------------------------------------------
 # 1. Install Docker

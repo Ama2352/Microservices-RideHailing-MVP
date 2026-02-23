@@ -135,7 +135,7 @@ pipeline {
                     agent {
                         docker {
                             image 'aquasec/trivy:0.48.3'
-                            args  '-u root'
+                            args  '-u root -v /tmp/trivy-cache:/root/.cache/trivy'
                             reuseNode true
                         }
                     }
@@ -144,10 +144,10 @@ pipeline {
                             set -e
                             SCAN_FAILED=0
                             trivy image --input dispatch-service.tar \
-                                --severity HIGH,CRITICAL --exit-code 1 --no-progress --format table \
+                                --severity HIGH,CRITICAL --exit-code 1 --format table \
                                 || SCAN_FAILED=1
                             trivy image --input notification-service.tar \
-                                --severity HIGH,CRITICAL --exit-code 1 --no-progress --format table \
+                                --severity HIGH,CRITICAL --exit-code 1 --format table \
                                 || SCAN_FAILED=1
                             [ $SCAN_FAILED -eq 0 ] || { echo "Security gate failed — not pushing."; exit 1; }
                         '''
