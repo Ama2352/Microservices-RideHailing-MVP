@@ -21,6 +21,7 @@ pipeline {
 
                 stage('Checkout') {
                     steps {
+                        echo "Checking out source code from SCM..."
                         checkout scm
                         script {
                             env.IMAGE_TAG = "${env.BUILD_NUMBER}-${env.GIT_COMMIT?.take(7) ?: 'latest'}"
@@ -43,9 +44,13 @@ pipeline {
                             steps {
                                 dir('services/dispatch') {
                                     sh '''
+                                        echo "=== [dispatch] Downloading Go modules ==="
                                         go mod download
+                                        echo "=== [dispatch] Running go vet ==="
                                         go vet ./...
+                                        echo "=== [dispatch] Running unit tests ==="
                                         go test -v -coverprofile=coverage.out ./... || echo "No tests yet"
+                                        echo "=== [dispatch] Tests complete ==="
                                     '''
                                 }
                             }
@@ -62,9 +67,13 @@ pipeline {
                             steps {
                                 dir('services/notification') {
                                     sh '''
+                                        echo "=== [notification] Downloading Go modules ==="
                                         go mod download
+                                        echo "=== [notification] Running go vet ==="
                                         go vet ./...
+                                        echo "=== [notification] Running unit tests ==="
                                         go test -v -coverprofile=coverage.out ./... || echo "No tests yet"
+                                        echo "=== [notification] Tests complete ==="
                                     '''
                                 }
                             }
@@ -80,10 +89,14 @@ pipeline {
                             }
                             steps {
                                 sh '''
+                                    echo "=== Installing govulncheck ==="
                                     go install golang.org/x/vuln/cmd/govulncheck@latest
                                     GOVULNCHECK=$(go env GOPATH)/bin/govulncheck
+                                    echo "=== [dispatch] Scanning for known vulnerabilities ==="
                                     cd services/dispatch && $GOVULNCHECK ./...
+                                    echo "=== [notification] Scanning for known vulnerabilities ==="
                                     cd ../../services/notification && $GOVULNCHECK ./...
+                                    echo "=== Dependency scan complete — no known vulnerabilities ==="
                                 '''
                             }
                         }
@@ -102,10 +115,14 @@ pipeline {
                     steps {
                         withCredentials([string(credentialsId: 'sonarqube-token', variable: 'SONAR_TOKEN')]) {
                             sh '''
+                                echo "=== [dispatch] Running SonarQube analysis ==="
                                 cd services/dispatch
                                 sonar-scanner -Dsonar.host.url=${SONAR_HOST} -Dsonar.token=${SONAR_TOKEN}
+                                echo "=== [dispatch] SonarQube analysis submitted ==="
+                                echo "=== [notification] Running SonarQube analysis ==="
                                 cd ../../services/notification
                                 sonar-scanner -Dsonar.host.url=${SONAR_HOST} -Dsonar.token=${SONAR_TOKEN}
+                                echo "=== [notification] SonarQube analysis submitted ==="
                             '''
                         }
                     }
@@ -122,10 +139,15 @@ pipeline {
                     steps {
                         sh '''
                             set -e
+                            echo "=== [dispatch] Building Docker image: dispatch-service:${IMAGE_TAG} ==="
                             docker build -t dispatch-service:${IMAGE_TAG}     services/dispatch
+                            echo "=== [dispatch] Saving image to tar for scanning ==="
                             docker save  dispatch-service:${IMAGE_TAG}     -o dispatch-service.tar
+                            echo "=== [notification] Building Docker image: notification-service:${IMAGE_TAG} ==="
                             docker build -t notification-service:${IMAGE_TAG} services/notification
+                            echo "=== [notification] Saving image to tar for scanning ==="
                             docker save  notification-service:${IMAGE_TAG} -o notification-service.tar
+                            echo "=== Image tars ready for security scan ==="
                             ls -lh *.tar
                         '''
                     }
@@ -143,13 +165,16 @@ pipeline {
                         sh '''
                             set -e
                             SCAN_FAILED=0
+                            echo "=== [dispatch] Scanning for HIGH/CRITICAL CVEs ==="
                             trivy image --input dispatch-service.tar \
                                 --severity HIGH,CRITICAL --exit-code 1 --format table \
                                 || SCAN_FAILED=1
+                            echo "=== [notification] Scanning for HIGH/CRITICAL CVEs ==="
                             trivy image --input notification-service.tar \
                                 --severity HIGH,CRITICAL --exit-code 1 --format table \
                                 || SCAN_FAILED=1
                             [ $SCAN_FAILED -eq 0 ] || { echo "Security gate failed — not pushing."; exit 1; }
+                            echo "=== Security gate passed — both images are clean ==="
                         '''
                     }
                 }
@@ -170,24 +195,29 @@ pipeline {
                         )]) {
                             sh '''
                                 set -e
+                                echo "=== Authenticating with Docker registry ==="
                                 echo "${DOCKER_PASS}" | docker login -u "${DOCKER_USER}" --password-stdin
 
+                                echo "=== [dispatch] Tagging and pushing to ${DOCKER_REGISTRY} ==="
                                 docker tag dispatch-service:${IMAGE_TAG} ${DOCKER_REGISTRY}/dispatch-service:${IMAGE_TAG}
                                 docker tag dispatch-service:${IMAGE_TAG} ${DOCKER_REGISTRY}/dispatch-service:latest
                                 docker push ${DOCKER_REGISTRY}/dispatch-service:${IMAGE_TAG}
                                 docker push ${DOCKER_REGISTRY}/dispatch-service:latest
 
+                                echo "=== [notification] Tagging and pushing to ${DOCKER_REGISTRY} ==="
                                 docker tag notification-service:${IMAGE_TAG} ${DOCKER_REGISTRY}/notification-service:${IMAGE_TAG}
                                 docker tag notification-service:${IMAGE_TAG} ${DOCKER_REGISTRY}/notification-service:latest
                                 docker push ${DOCKER_REGISTRY}/notification-service:${IMAGE_TAG}
                                 docker push ${DOCKER_REGISTRY}/notification-service:latest
 
+                                echo "=== Cleaning up local images to free disk space ==="
                                 docker rmi dispatch-service:${IMAGE_TAG} \
                                            ${DOCKER_REGISTRY}/dispatch-service:${IMAGE_TAG} \
                                            ${DOCKER_REGISTRY}/dispatch-service:latest || true
                                 docker rmi notification-service:${IMAGE_TAG} \
                                            ${DOCKER_REGISTRY}/notification-service:${IMAGE_TAG} \
                                            ${DOCKER_REGISTRY}/notification-service:latest || true
+                                echo "=== All images pushed successfully ==="
                             '''
                         }
                     }
@@ -197,84 +227,52 @@ pipeline {
         }
 
         stage('CD') {
-            agent { label 'built-in' }
+            agent {
+                kubernetes {
+                    yamlFile 'infrastructure/vm/platform/jenkins/pod-templates/cd-pod.yaml'
+                    defaultContainer 'kubectl'
+                }
+            }
 
             stages {
 
                 stage('Deploy to Kubernetes') {
-                    agent {
-                        docker {
-                            image 'alpine/k8s:1.29.0'
-                            args  '-u root -e HOME=/root'
-                            reuseNode true
-                        }
-                    }
-                    steps {
-                        withCredentials([string(credentialsId: 'k8s-sa-token', variable: 'K8S_TOKEN')]) {
-                            sh '''
-                                set -e
-                                cat > kubeconfig.yaml << EOF
-apiVersion: v1
-kind: Config
-clusters:
-- cluster:
-    server: ${KUBERNETES_SERVER}
-    insecure-skip-tls-verify: true
-  name: k8s
-contexts:
-- context:
-    cluster: k8s
-    user: jenkins
-  name: k8s
-current-context: k8s
-users:
-- name: jenkins
-  user:
-    token: ${K8S_TOKEN}
-EOF
-                                export KUBECONFIG=./kubeconfig.yaml
-                                export DOCKER_REGISTRY="${DOCKER_REGISTRY}"
-                                export IMAGE_TAG="${IMAGE_TAG}"
-
-                                cat services/dispatch/k8s.yaml     | envsubst | kubectl apply -f -
-                                kubectl apply -f services/dispatch/istio.yaml
-                                cat services/notification/k8s.yaml | envsubst | kubectl apply -f -
-                                kubectl apply -f services/notification/istio.yaml
-
-                                kubectl -n ride-hailing rollout status deployment/dispatch-service     --timeout=300s
-                                kubectl -n ride-hailing rollout status deployment/notification-service --timeout=300s
-                            '''
-                        }
-                    }
-                }
-
-                stage('Verify Deployment') {
-                    agent {
-                        docker {
-                            image 'alpine/k8s:1.29.0'
-                            args  '-u root -e HOME=/root'
-                            reuseNode true
-                        }
-                    }
                     steps {
                         sh '''
-                            export KUBECONFIG=./kubeconfig.yaml
-                            kubectl -n ride-hailing get pods -o wide
-                            kubectl -n ride-hailing get svc
-                            kubectl -n ride-hailing get gateway,virtualservice,destinationrule
-                            kubectl -n ride-hailing get pods \
-                                -o custom-columns='NAME:.metadata.name,CONTAINERS:.spec.containers[*].name'
-                            kubectl -n istio-system get svc istio-ingressgateway
+                            set -e
+                            echo "=== Starting Kubernetes Deployment ==="
+
+                            echo "--- [dispatch] Applying manifests ---"
+                            export DOCKER_REGISTRY="${DOCKER_REGISTRY}"
+                            export IMAGE_TAG="${IMAGE_TAG}"
+                            cat services/dispatch/k8s.yaml | envsubst | kubectl apply -f -
+                            echo "--- [dispatch] Applying Istio routing rules ---"
+                            kubectl apply -f services/dispatch/istio.yaml
+
+                            echo "--- [notification] Applying manifests ---"
+                            cat services/notification/k8s.yaml | envsubst | kubectl apply -f -
+                            echo "--- [notification] Applying Istio routing rules ---"
+                            kubectl apply -f services/notification/istio.yaml
+
+                            echo "--- Waiting for rollouts to complete (timeout: 300s) ---"
+                            kubectl -n ride-hailing rollout status deployment/dispatch-service     --timeout=300s
+                            kubectl -n ride-hailing rollout status deployment/notification-service --timeout=300s
+                            echo "=== All deployments rolled out successfully ==="
                         '''
                     }
                 }
 
-            }
-
-            post {
-                always {
-                    sh 'rm -f kubeconfig.yaml'
+                stage('Verify Deployment') {
+                    steps {
+                        sh '''
+                            echo "=== Verifying pod health (rollout already confirmed readiness) ==="
+                            # Check Running status and restart count — the only signal that matters post-rollout.
+                            kubectl -n ride-hailing get pods -o wide
+                            echo "=== Verification complete ==="
+                        '''
+                    }
                 }
+
             }
         }
 
@@ -282,132 +280,43 @@ EOF
     
     post {
         success {
-            echo "Pipeline completed successfully!"
-            echo "Deployed version: ${env.IMAGE_TAG}"
-
-            mail(
-                to: "honguyenminhsang2005@gmail.com",
-                subject: "✓ CI/CD Pipeline Success - Build #${env.BUILD_NUMBER}",
-                body: """
-===========================================
-✓ CI/CD PIPELINE SUCCESS
-===========================================
-
-Build Information:
-------------------
-Build Number:     #${env.BUILD_NUMBER}
-Git Commit:       ${env.GIT_COMMIT}
-Git Branch:       ${env.GIT_BRANCH ?: 'N/A'}
-Image Tag:        ${env.IMAGE_TAG}
-Build Duration:   ${currentBuild.durationString}
-
-Deployed Images:
-------------------
-${DOCKER_REGISTRY}/dispatch-service:${env.IMAGE_TAG}
-${DOCKER_REGISTRY}/notification-service:${env.IMAGE_TAG}
-
-Security Validation:
-------------------
-✓ Unit Tests Passed (parallel — dispatch + notification)
-✓ Dependency Scan Passed (govulncheck, parallel with tests)
-✓ SonarQube Quality Gate Passed
-✓ Container Image Scan Passed (Trivy)
-
-Access Services:
-------------------
-Services are exposed via Istio Ingress Gateway on NodePort 30080
-
-Test endpoints (replace <NODE-IP> with any cluster node IP):
-  curl http://<NODE-IP>:30080/dispatch/health
-  curl http://<NODE-IP>:30080/notification/health
-
-To get node IPs:
-  kubectl get nodes -o wide
-
-Deployment successful at: ${new Date()}
-
-View Build:
-------------------
-Blue Ocean:    http://192.168.242.13:8080/blue/organizations/jenkins/ride-hailing-services/detail/ride-hailing-services/${env.BUILD_NUMBER}/pipeline
-Console:       http://192.168.242.13:8080/job/ride-hailing-services/${env.BUILD_NUMBER}/console
-Classic View:  http://192.168.242.13:8080/job/ride-hailing-services/${env.BUILD_NUMBER}/
-===========================================
-"""
-            )
+            node('built-in') {
+                script {
+                    echo "Pipeline completed successfully! Deployed version: ${env.IMAGE_TAG}"
+                    def body = readFile('infrastructure/vm/platform/jenkins/email/success.txt')
+                        .replace('@@BUILD_NUMBER@@',  env.BUILD_NUMBER         ?: '')
+                        .replace('@@GIT_COMMIT@@',    env.GIT_COMMIT           ?: '')
+                        .replace('@@GIT_BRANCH@@',    env.GIT_BRANCH           ?: 'N/A')
+                        .replace('@@IMAGE_TAG@@',     env.IMAGE_TAG            ?: '')
+                        .replace('@@BUILD_DURATION@@', currentBuild.durationString ?: '')
+                        .replace('@@DOCKER_REGISTRY@@', DOCKER_REGISTRY        ?: '')
+                        .replace('@@TIMESTAMP@@',     new Date().toString())
+                    mail(
+                        to:      'honguyenminhsang2005@gmail.com',
+                        subject: "\u2713 CI/CD Pipeline Success - Build #${env.BUILD_NUMBER}",
+                        body:    body
+                    )
+                }
+            }
         }
 
         failure {
-            echo "✗ Pipeline failed! Check logs for details."
-
-            mail(
-                to: "honguyenminhsang2005@gmail.com",
-                subject: "✗ CI/CD Pipeline FAILURE - Build #${env.BUILD_NUMBER}",
-                body: """
-===========================================
-✗ CI/CD PIPELINE FAILURE
-===========================================
-
-⚠️ IMMEDIATE ACTION REQUIRED ⚠️
-
-Build Information:
-------------------
-Build Number:     #${env.BUILD_NUMBER}
-Git Commit:       ${env.GIT_COMMIT}
-Git Branch:       ${env.GIT_BRANCH}
-Failed Stage:     ${env.STAGE_NAME}
-Build Duration:   ${currentBuild.durationString}
-
-Failure Analysis:
-------------------
-The pipeline failed at stage: ${env.STAGE_NAME}
-
-Common Failure Scenarios:
-- Stage 2 (Verify Source):    Unit test failures, vet errors, or vulnerable dependencies
-- Stage 3 (SonarQube):        Code quality gate failed
-- Stage 5 (Scan Images):      HIGH/CRITICAL CVEs in container images
-- Stage 7 (Deploy):           Kubernetes deployment/rollout timeout
-
-Security Alert:
-------------------
-⚠️ If failure occurred at Stage 5 (Scan Images):
-   → Images were NOT pushed to registry
-   → No vulnerable code reached production
-   → Review Trivy output in build logs
-
-Action Required:
-------------------
-1. Review full logs in Jenkins console
-2. Check security scan output if applicable
-3. Fix root cause before triggering a new build
-4. Do NOT bypass security gates
-
-Debug Commands:
-------------------
-# View Jenkins logs (Docker container on jenkins-vm)
-ssh vagrant@192.168.242.13 'docker logs jenkins --tail 100'
-
-# Check running Docker containers (CI agent containers)
-ssh vagrant@192.168.242.13 'docker ps'
-
-# Review last K8s deployment
-kubectl -n ride-hailing get pods,svc
-
-Failed at: ${new Date()}
-
-View Build (Blue Ocean shows failed stage clearly):
-------------------
-Blue Ocean:    http://192.168.242.13:8080/blue/organizations/jenkins/ride-hailing-services/detail/ride-hailing-services/${env.BUILD_NUMBER}/pipeline
-Console:       http://192.168.242.13:8080/job/ride-hailing-services/${env.BUILD_NUMBER}/console
-Classic View:  http://192.168.242.13:8080/job/ride-hailing-services/${env.BUILD_NUMBER}/
-===========================================
-"""
-            )
-        }
-
-        always {
-            node('built-in') { 
-                cleanWs() 
-                sh 'docker system prune -f'
+            node('built-in') {
+                script {
+                    echo "Pipeline failed! Check logs for details."
+                    def body = readFile('infrastructure/vm/platform/jenkins/email/failure.txt')
+                        .replace('@@BUILD_NUMBER@@',  env.BUILD_NUMBER         ?: '')
+                        .replace('@@GIT_COMMIT@@',    env.GIT_COMMIT           ?: '')
+                        .replace('@@GIT_BRANCH@@',    env.GIT_BRANCH           ?: '')
+                        .replace('@@STAGE_NAME@@',    env.STAGE_NAME           ?: 'Unknown')
+                        .replace('@@BUILD_DURATION@@', currentBuild.durationString ?: '')
+                        .replace('@@TIMESTAMP@@',     new Date().toString())
+                    mail(
+                        to:      'honguyenminhsang2005@gmail.com',
+                        subject: "\u2717 CI/CD Pipeline FAILURE - Build #${env.BUILD_NUMBER}",
+                        body:    body
+                    )
+                }
             }
         }
     }

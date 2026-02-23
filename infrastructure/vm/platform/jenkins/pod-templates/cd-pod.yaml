@@ -1,0 +1,25 @@
+# =============================================================================
+# Jenkins CD Agent Pod Template
+# Runs inside the Kubernetes cluster — uses the jenkins SA for in-cluster auth.
+# SA permissions are defined in infrastructure/vm/platform/jenkins/01-rbac.yaml
+# No kubeconfig file needed; kubectl detects in-cluster credentials automatically.
+# =============================================================================
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    app: jenkins-cd-agent
+spec:
+  serviceAccountName: jenkins
+  containers:
+    - name: kubectl
+      image: alpine/k8s:1.29.0
+      command: ["cat"]
+      tty: true
+      resources:
+        requests:
+          memory: "128Mi"
+          cpu: "100m"
+        limits:
+          memory: "256Mi"
+          cpu: "500m"

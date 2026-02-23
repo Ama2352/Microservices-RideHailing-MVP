@@ -1,0 +1,57 @@
+===========================================
+✗ CI/CD PIPELINE FAILURE
+===========================================
+
+⚠️ IMMEDIATE ACTION REQUIRED ⚠️
+
+Build Information:
+------------------
+Build Number:     #@@BUILD_NUMBER@@
+Git Commit:       @@GIT_COMMIT@@
+Git Branch:       @@GIT_BRANCH@@
+Failed Stage:     @@STAGE_NAME@@
+Build Duration:   @@BUILD_DURATION@@
+
+Failure Analysis:
+------------------
+The pipeline failed at stage: @@STAGE_NAME@@
+
+Common Failure Scenarios:
+- Stage 2 (Verify Source):    Unit test failures, vet errors, or vulnerable dependencies
+- Stage 3 (SonarQube):        Code quality gate failed
+- Stage 5 (Scan Images):      HIGH/CRITICAL CVEs in container images
+- Stage 7 (Deploy):           Kubernetes deployment/rollout timeout
+
+Security Alert:
+------------------
+⚠️ If failure occurred at Stage 5 (Scan Images):
+   → Images were NOT pushed to registry
+   → No vulnerable code reached production
+   → Review Trivy output in build logs
+
+Action Required:
+------------------
+1. Review full logs in Jenkins console
+2. Check security scan output if applicable
+3. Fix root cause before triggering a new build
+4. Do NOT bypass security gates
+
+Debug Commands:
+------------------
+# View Jenkins logs (Docker container on jenkins-vm)
+ssh vagrant@192.168.242.13 'docker logs jenkins --tail 100'
+
+# Check running Docker containers (CI agent containers)
+ssh vagrant@192.168.242.13 'docker ps'
+
+# Review last K8s deployment
+kubectl -n ride-hailing get pods,svc
+
+Failed at: @@TIMESTAMP@@
+
+View Build (Blue Ocean shows failed stage clearly):
+------------------
+Blue Ocean:    http://192.168.242.13:8080/blue/organizations/jenkins/ride-hailing-services/detail/ride-hailing-services/@@BUILD_NUMBER@@/pipeline
+Console:       http://192.168.242.13:8080/job/ride-hailing-services/@@BUILD_NUMBER@@/console
+Classic View:  http://192.168.242.13:8080/job/ride-hailing-services/@@BUILD_NUMBER@@/
+===========================================
