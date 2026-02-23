@@ -36,7 +36,7 @@ pipeline {
                             agent {
                                 docker {
                                     image 'golang:1.25.7-alpine'
-                                    args  '-u root -e HOME=/root -e GOPATH=/root/go'
+                                    args  '-u root -e HOME=/root -e GOPATH=/root/go -v /tmp/go-mod-cache:/root/go/pkg/mod -v /tmp/go-build-cache:/root/.cache/go-build'
                                     reuseNode true
                                 }
                             }
@@ -55,7 +55,7 @@ pipeline {
                             agent {
                                 docker {
                                     image 'golang:1.25.7-alpine'
-                                    args  '-u root -e HOME=/root -e GOPATH=/root/go'
+                                    args  '-u root -e HOME=/root -e GOPATH=/root/go -v /tmp/go-mod-cache:/root/go/pkg/mod -v /tmp/go-build-cache:/root/.cache/go-build'
                                     reuseNode true
                                 }
                             }
@@ -74,7 +74,7 @@ pipeline {
                             agent {
                                 docker {
                                     image 'golang:1.25.7-alpine'
-                                    args  '-u root -e HOME=/root -e GOPATH=/root/go'
+                                    args  '-u root -e HOME=/root -e GOPATH=/root/go -v /tmp/go-mod-cache:/root/go/pkg/mod -v /tmp/go-build-cache:/root/.cache/go-build'
                                     reuseNode true
                                 }
                             }
@@ -95,7 +95,7 @@ pipeline {
                     agent {
                         docker {
                             image 'sonarsource/sonar-scanner-cli:11.3'
-                            args  '-u root -e HOME=/root'
+                            args  '-u root -e HOME=/root -v /tmp/sonar-cache:/root/.sonar/cache'
                             reuseNode true
                         }
                     }
