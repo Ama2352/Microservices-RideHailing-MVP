@@ -403,6 +403,13 @@ Classic View:  http://192.168.242.13:8080/job/ride-hailing-services/${env.BUILD_
 """
             )
         }
+
+        always {
+            node('built-in') { 
+                cleanWs() 
+                sh 'docker system prune -f'
+            }
+        }
     }
 }
 
