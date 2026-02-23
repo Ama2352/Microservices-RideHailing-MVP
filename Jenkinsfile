@@ -135,7 +135,7 @@ pipeline {
                     agent {
                         docker {
                             image 'aquasec/trivy:0.48.3'
-                            args  '-u root -v /tmp/trivy-cache:/root/.cache/trivy'
+                            args  '-u root -v /tmp/trivy-cache:/root/.cache/trivy --entrypoint='
                             reuseNode true
                         }
                     }
