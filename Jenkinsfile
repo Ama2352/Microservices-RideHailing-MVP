@@ -2,9 +2,9 @@ pipeline {
     agent none
 
     environment {
-        DOCKER_REGISTRY   = "${env.DOCKER_REGISTRY   ?: 'docker.io/your-dockerhub-username'}"
-        SONAR_HOST        = "${env.SONAR_HOST        ?: 'http://192.168.242.10:30090'}"
-        KUBERNETES_SERVER = "${env.KUBERNETES_SERVER ?: 'https://192.168.242.10:6443'}"
+        DOCKER_REGISTRY   = "docker.io/ama2352"
+        SONAR_HOST        = "http://192.168.242.10:30090"
+        KUBERNETES_SERVER = "https://192.168.242.10:6443"
     }
 
     options {
