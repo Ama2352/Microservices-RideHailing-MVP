@@ -3,10 +3,6 @@
 # Runs inside the Kubernetes cluster — uses the jenkins SA for in-cluster auth.
 # SA permissions are defined in infrastructure/vm/platform/jenkins/01-rbac.yaml
 # No kubeconfig file needed; kubectl detects in-cluster credentials automatically.
-#
-# The jnlp container is declared explicitly so that JENKINS_URL and
-# JENKINS_TUNNEL are hardcoded — without this the auto-injected sidecar
-# ignores the cloud config values and the pod hangs forever trying to connect.
 # =============================================================================
 apiVersion: v1
 kind: Pod
@@ -24,8 +20,6 @@ spec:
       env:
         - name: JENKINS_URL
           value: "http://192.168.242.13:8080"
-        - name: JENKINS_TUNNEL
-          value: "192.168.242.13:50000"
     - name: kubectl
       image: alpine/k8s:1.29.0
       command: ["cat"]
