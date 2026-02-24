@@ -240,8 +240,6 @@ pipeline {
 
                 stage('Deploy to Kubernetes') {
                     steps {
-                        echo "Checking out source code to get manifests..."
-                        checkout scm
                         sh '''
                             set -e
                             echo "=== Starting Kubernetes Deployment ==="

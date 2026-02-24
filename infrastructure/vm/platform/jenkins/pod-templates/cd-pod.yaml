@@ -3,23 +3,22 @@
 # Runs inside the Kubernetes cluster — uses the jenkins SA for in-cluster auth.
 # SA permissions are defined in infrastructure/vm/platform/jenkins/01-rbac.yaml
 # No kubeconfig file needed; kubectl detects in-cluster credentials automatically.
+#
+# hostNetwork: true — the pod uses the node's real network interface
+# (192.168.242.10/.11/.12) instead of the Calico overlay CIDR. This gives the
+# jnlp sidecar a direct route to the Jenkins master at 192.168.242.13 without
+# requiring any cross-network routing configuration.
 # =============================================================================
 apiVersion: v1
 kind: Pod
 metadata:
-  namespace: jenkins
   labels:
     app: jenkins-cd-agent
 spec:
+  hostNetwork: true
+  dnsPolicy: ClusterFirstWithHostNet   # required with hostNetwork to keep k8s DNS working
   serviceAccountName: jenkins
   containers:
-    # jnlp sidecar — must be named exactly "jnlp".
-    # Connects back to the Jenkins master so the stage can execute.
-    - name: jnlp
-      image: jenkins/inbound-agent:latest
-      env:
-        - name: JENKINS_URL
-          value: "http://192.168.242.13:8080"
     - name: kubectl
       image: alpine/k8s:1.29.0
       command: ["cat"]
