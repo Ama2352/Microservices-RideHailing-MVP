@@ -29,6 +29,12 @@ rules:
   - apiGroups: [""]
     resources: ["pods/log"]
     verbs: ["get", "list", "watch"]
+  # configmaps — the Kubernetes plugin creates a ConfigMap per agent pod to
+  # pass the JNLP agent configuration (secret agent name, etc.) as a mounted
+  # file. Without create/delete here the pod provisioning silently fails.
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["create", "delete", "get", "list"]
 ---
 # Bind ClusterRole to jenkins SA in jenkins namespace
 apiVersion: rbac.authorization.k8s.io/v1
