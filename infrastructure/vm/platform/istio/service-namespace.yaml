@@ -1,5 +1,5 @@
 # =============================================================================
-# Dispatch Service Namespace
+# Ride-Hailing Namespace (Service Namespace)
 # =============================================================================
 apiVersion: v1
 kind: Namespace

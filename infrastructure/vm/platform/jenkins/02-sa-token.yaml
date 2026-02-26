@@ -1,0 +1,18 @@
+# =============================================================================
+# Jenkins ServiceAccount Token
+# Creates a long-lived token for the jenkins SA.
+# Used by the Jenkins Kubernetes plugin running on jenkins-vm (external to K8s)
+# to authenticate against the kube-apiserver at 192.168.242.10:6443.
+#
+# K8s 1.24+ removed auto-creation of SA tokens. This Secret manually provisions
+# one — the documented approach for external CI/CD controllers.
+# Ref: https://kubernetes.io/docs/tasks/configure-pod-container/configure-service-account/#manually-create-an-api-token-for-a-serviceaccount
+# =============================================================================
+apiVersion: v1
+kind: Secret
+metadata:
+  name: jenkins-sa-token
+  namespace: jenkins
+  annotations:
+    kubernetes.io/service-account.name: jenkins
+type: kubernetes.io/service-account-token

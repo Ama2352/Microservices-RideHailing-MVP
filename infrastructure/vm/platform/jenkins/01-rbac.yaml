@@ -10,37 +10,24 @@ metadata:
   name: jenkins
   namespace: jenkins
 ---
-# ClusterRole: Minimal cluster-wide permissions for Jenkins agent management
+# ClusterRole: Minimal permissions for Jenkins Kubernetes plugin agent lifecycle.
+# Bound only to the jenkins namespace via RoleBinding below.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   name: jenkins-agent-manager
 rules:
-  # Pod management for dynamic agents (jenkins namespace only via RoleBinding)
+  # Pod lifecycle — create/delete/patch agents; get/list/watch for status polling
   - apiGroups: [""]
     resources: ["pods"]
     verbs: ["create", "delete", "get", "list", "watch", "patch"]
+  # exec — Jenkins plugin runs commands inside agent pods
   - apiGroups: [""]
     resources: ["pods/exec"]
     verbs: ["create", "get"]
+  # log — stream build output from agent pods
   - apiGroups: [""]
     resources: ["pods/log"]
-    verbs: ["get", "list", "watch"]
-  # Secret access for credentials
-  - apiGroups: [""]
-    resources: ["secrets"]
-    verbs: ["get", "list", "watch"]
-  # ConfigMap access
-  - apiGroups: [""]
-    resources: ["configmaps"]
-    verbs: ["get", "list", "watch", "create", "update", "patch"]
-  # PVC for workspace persistence
-  - apiGroups: [""]
-    resources: ["persistentvolumeclaims"]
-    verbs: ["get", "list", "watch", "create", "delete"]
-  # Events for monitoring
-  - apiGroups: [""]
-    resources: ["events"]
     verbs: ["get", "list", "watch"]
 ---
 # Bind ClusterRole to jenkins SA in jenkins namespace
@@ -58,35 +45,33 @@ subjects:
     name: jenkins
     namespace: jenkins
 ---
-# Role: Scoped permissions for ride-hailing namespace ONLY
+# Role: Scoped permissions for ride-hailing namespace ONLY.
+# Covers exactly the resources present in services/*/k8s.yaml and services/*/istio.yaml.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: jenkins-deployer
   namespace: ride-hailing
 rules:
-  # Deployment management
+  # Deployment — kubectl apply + rollout status
   - apiGroups: ["apps"]
     resources: ["deployments"]
     verbs: ["get", "list", "watch", "create", "update", "patch"]
+  # ReplicaSet — queried internally by kubectl rollout status
   - apiGroups: ["apps"]
     resources: ["replicasets"]
     verbs: ["get", "list", "watch"]
-  # Service management
+  # Service — present in k8s.yaml
   - apiGroups: [""]
     resources: ["services"]
     verbs: ["get", "list", "watch", "create", "update", "patch"]
-  # ConfigMaps and Secrets for app configuration
-  - apiGroups: [""]
-    resources: ["configmaps", "secrets"]
-    verbs: ["get", "list", "watch", "create", "update", "patch"]
-  # Pods for rollout status check
+  # Pods — kubectl rollout status + verify get pods
   - apiGroups: [""]
     resources: ["pods"]
     verbs: ["get", "list", "watch"]
-  # Istio networking resources
+  # Istio — VirtualService + DestinationRule present in istio.yaml
   - apiGroups: ["networking.istio.io"]
-    resources: ["virtualservices", "destinationrules", "gateways"]
+    resources: ["virtualservices", "destinationrules"]
     verbs: ["get", "list", "watch", "create", "update", "patch"]
 ---
 # Bind Role to jenkins SA for ride-hailing namespace
@@ -103,30 +88,4 @@ subjects:
   - kind: ServiceAccount
     name: jenkins
     namespace: jenkins
----
-# Role: Scoped permissions for istio-system namespace only
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: jenkins-istio-viewer
-  namespace: istio-system
 
-rules:
-  - apiGroups: [""]
-    resources: ["services", "endpoints", "pods"]
-    verbs: ["get", "list", "watch"]
----
-# Bind Role to jenkins SA for istio-system namespace
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: jenkins-istio-viewer-binding
-  namespace: istio-system
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: Role
-  name: jenkins-istio-viewer
-subjects:
-  - kind: ServiceAccount
-    name: jenkins
-    namespace: jenkins 

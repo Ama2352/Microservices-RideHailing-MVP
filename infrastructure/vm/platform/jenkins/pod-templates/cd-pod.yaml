@@ -1,0 +1,32 @@
+# =============================================================================
+# Jenkins CD Agent Pod Template
+# Runs inside the Kubernetes cluster — uses the jenkins SA for in-cluster auth.
+# SA permissions are defined in infrastructure/vm/platform/jenkins/01-rbac.yaml
+# No kubeconfig file needed; kubectl detects in-cluster credentials automatically.
+#
+# hostNetwork: true — the pod uses the node's real network interface
+# (192.168.242.10/.11/.12) instead of the Calico overlay CIDR. This gives the
+# jnlp sidecar a direct route to the Jenkins master at 192.168.242.13 without
+# requiring any cross-network routing configuration.
+# =============================================================================
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    app: jenkins-cd-agent
+spec:
+  hostNetwork: true
+  dnsPolicy: ClusterFirstWithHostNet   # required with hostNetwork to keep k8s DNS working
+  serviceAccountName: jenkins
+  containers:
+    - name: kubectl
+      image: alpine/k8s:1.29.0
+      command: ["cat"]
+      tty: true
+      resources:
+        requests:
+          memory: "128Mi"
+          cpu: "100m"
+        limits:
+          memory: "256Mi"
+          cpu: "500m"

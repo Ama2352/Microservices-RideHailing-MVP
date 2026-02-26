@@ -1,0 +1,43 @@
+===========================================
+✓ CI/CD PIPELINE SUCCESS
+===========================================
+
+Build Information:
+------------------
+Build Number:     #@@BUILD_NUMBER@@
+Git Commit:       @@GIT_COMMIT@@
+Git Branch:       @@GIT_BRANCH@@
+Image Tag:        @@IMAGE_TAG@@
+Build Duration:   @@BUILD_DURATION@@
+
+Deployed Images:
+------------------
+@@DOCKER_REGISTRY@@/dispatch-service:@@IMAGE_TAG@@
+@@DOCKER_REGISTRY@@/notification-service:@@IMAGE_TAG@@
+
+Security Validation:
+------------------
+✓ Unit Tests Passed (parallel — dispatch + notification)
+✓ Dependency Scan Passed (govulncheck, parallel with tests)
+✓ SonarQube Quality Gate Passed
+✓ Container Image Scan Passed (Trivy)
+
+Access Services:
+------------------
+Services are exposed via Istio Ingress Gateway on NodePort 30080
+
+Test endpoints (replace <NODE-IP> with any cluster node IP):
+  curl http://<NODE-IP>:30080/dispatch/health
+  curl http://<NODE-IP>:30080/notification/health
+
+To get node IPs:
+  kubectl get nodes -o wide
+
+Deployment successful at: @@TIMESTAMP@@
+
+View Build:
+------------------
+Blue Ocean:    http://192.168.242.13:8080/blue/organizations/jenkins/ride-hailing-services/detail/ride-hailing-services/@@BUILD_NUMBER@@/pipeline
+Console:       http://192.168.242.13:8080/job/ride-hailing-services/@@BUILD_NUMBER@@/console
+Classic View:  http://192.168.242.13:8080/job/ride-hailing-services/@@BUILD_NUMBER@@/
+===========================================

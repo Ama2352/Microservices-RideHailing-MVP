@@ -11,7 +11,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ISTIO_VERSION="1.27.2"
 INSTALL_DIR="/tmp/istio-install"
 
-echo ">>> [1/5] Downloading Istio ${ISTIO_VERSION}..."
+echo ">>> [1/8] Downloading Istio ${ISTIO_VERSION}..."
 mkdir -p "${INSTALL_DIR}"
 cd "${INSTALL_DIR}"
 
@@ -21,10 +21,10 @@ fi
 
 export PATH="${INSTALL_DIR}/istio-${ISTIO_VERSION}/bin:$PATH"
 
-echo ">>> [2/5] Verifying istioctl..."
+echo ">>> [2/8] Verifying istioctl..."
 istioctl version --remote=false
 
-echo ">>> [3/5] Checking Calico CNI compatibility..."
+echo ">>> [3/8] Checking Calico CNI compatibility..."
 # Check if Calico is using BPF mode with incompatible load balancing
 if kubectl get felixconfiguration default &> /dev/null 2>&1; then
     BPF_LB=$(kubectl get felixconfiguration default -o jsonpath='{.spec.bpfConnectTimeLoadBalancing}' 2>/dev/null || echo "")
@@ -44,22 +44,25 @@ else
     echo "No FelixConfiguration found, skipping Calico check"
 fi
 
-echo ">>> [4/5] Installing Istio with Minimal Profile..."
+echo ">>> [4/8] Installing Istio with Minimal Profile..."
 # Using minimal profile with reduced resources for 9GB cluster
 istioctl install -y -f "${SCRIPT_DIR}/istio-operator.yaml"
 
-echo ">>> [5/5] Waiting for Istio components to be ready..."
+echo ">>> [5/8] Waiting for Istio components to be ready..."
 kubectl -n istio-system wait --for=condition=available deployment/istiod --timeout=300s
 kubectl -n istio-system wait --for=condition=available deployment/istio-ingressgateway --timeout=300s
 
-echo ">>> [6/5] Verifying installation..."
+echo ">>> [6/8] Verifying installation..."
 kubectl get pods -n istio-system
 echo ""
 echo "Checking Istio version..."
 istioctl version
 
-echo ">>> [7/7] Deploying Istio Gateway for ride-hailing services..."
+echo ">>> [7/8] Deploying Istio Gateway for ride-hailing services..."
 kubectl apply -f "${SCRIPT_DIR}/gateway.yaml"
+
+echo ">>> [8/8] Applying service namespace..."
+kubectl apply -f "${SCRIPT_DIR}/service-namespace.yaml"
 
 echo ""
 echo "=============================================="
