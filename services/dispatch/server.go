@@ -112,7 +112,7 @@ func setupRouter(config Config) *http.ServeMux {
 	// Health check endpoint (main application endpoint)
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		response := HealthResponse{
-			Status:    "healthy",
+			Status:    "healthy!",
 			Service:   config.ServiceName,
 			Timestamp: time.Now().UTC().Format(time.RFC3339),
 		}
